@@ -1,5 +1,28 @@
 # 订单处理器
 
+## 架构
+
+程序入口现在通过 `order_processor/bootstrap.py` 装配应用用例，而不是直接创建工作流。
+应用层仅依赖端口；Excel、SQLite、Agno 和存量 `core/` 流程均位于基础设施适配器中。
+完整边界、依赖方向及迁移规则请见 [ARCHITECTURE.md](ARCHITECTURE.md)。安装依赖后，配置
+`DEEPSEEK_API_KEY` 时动态规则编译和语义规则会通过 Agno 调用 DeepSeek；无 Key 时仍走原有本地确定性兜底。
+
+## AgentOS 服务
+
+完整 Agno 平台入口为 `order_processor.agentos:app`。它注册两个 Agent（规则编译、订单语义分析）和
+一个 `order-processing` Workflow，并将会话、运行记录与追踪写入 `data/agentos.db`。
+
+```powershell
+docker compose up --build
+```
+
+服务启动后直接访问 `http://localhost:8000/`，上传 Excel、输入输出文件名并下载结果即可。`/docs` 保留给
+接口调试或系统集成使用。调用 `POST /workflows/order-processing/runs` 时，使用表单字段 `message` 传入以下 JSON：
+
+```json
+{"input_path":"input/input_test.xlsx","output_path":"output/result.xlsx"}
+```
+
 直接读取已有 Excel 文件，不会自动创建或覆盖输入文件。
 
 运行（默认读取 `input/input_orders.xlsx`）：

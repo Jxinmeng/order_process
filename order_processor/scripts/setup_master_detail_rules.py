@@ -2,7 +2,7 @@
 import json, sqlite3, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from storage.rule_repository import RuleRepository
+from order_processor.infrastructure.persistence.rule_repository import RuleRepository
 
 # (分组, 名称, 条件, 动作, 输入, 输出, 状态)
 RULES = [

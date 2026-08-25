@@ -1,55 +1,12 @@
 """入口文件 - 启动工作流"""
 
 import os
-import ast
 import argparse
 from pathlib import Path
 
-from models.rule import Rule
-from core.workflow import OrderWorkflow
-from storage.rule_repository import RuleRepository
-from utils.run_logger import RunLog, set_log_path
-from utils.settings import load_project_env
-
-
-def load_rules_from_yaml(yaml_path: str) -> list:
-    """从YAML加载规则"""
-    # 配置只用到一个简单的规则列表。使用标准库解析，项目在尚未执行
-    # ``pip install -r requirements.txt`` 的环境中也能启动。
-    data = {"rules": []}
-    current_rule = None
-    with open(yaml_path, 'r', encoding='utf-8') as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or line == "rules:":
-                continue
-            if line.startswith("- "):
-                current_rule = {}
-                data["rules"].append(current_rule)
-                line = line[2:].strip()
-            if current_rule is None or ":" not in line:
-                continue
-            key, value = (part.strip() for part in line.split(":", 1))
-            if value.lower() in {"true", "false"}:
-                parsed_value = value.lower() == "true"
-            else:
-                try:
-                    parsed_value = ast.literal_eval(value)
-                except (ValueError, SyntaxError):
-                    parsed_value = value.strip("'\"")
-            current_rule[key] = parsed_value
-    
-    rules = []
-    for rule_data in data.get('rules', []):
-        rules.append(Rule(
-            id=rule_data['id'],
-            name=rule_data['name'],
-            condition=rule_data['condition'],
-            action_description=rule_data['action_description'],
-            priority=rule_data.get('priority', 0),
-            enabled=rule_data.get('enabled', True),
-        ))
-    return rules
+from order_processor.bootstrap import build_process_orders
+from order_processor.shared.run_logger import RunLog, set_log_path
+from order_processor.shared.settings import load_project_env
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -72,21 +29,9 @@ def main(args: argparse.Namespace):
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # 2. 初始化 SQLite 规则库。YAML 仅在首次建库时作为初始数据来源。
-    repository = RuleRepository("data/rules.db")
-    repository.initialize()
-    rules = repository.load_active_rules()
-    print(f"已从 data/rules.db 加载 {len(rules)} 条规则动作")
-    
-    # 3. 创建工作流
-    workflow = OrderWorkflow(
-        rules=rules,
-        llm_api_key=os.getenv("DEEPSEEK_API_KEY"),
-        rule_repository=repository,
-    )
-    
-    # 4. 执行
-    result = workflow.process(
+    # 组合根集中装配 SQLite、Excel 与 Agno/本地规则执行器。
+    process_orders = build_process_orders(os.getenv("DEEPSEEK_API_KEY"))
+    result = process_orders.execute(
         input_path=str(input_path),
         output_path=str(output_path)
     )
