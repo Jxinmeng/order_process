@@ -41,11 +41,17 @@ python main.py --input "D:\订单\待处理订单.xlsx" --output "D:\订单\处�
 `config/rules.yaml` 导入初始规则，之后程序只读取数据库；修改 YAML 不会覆盖
 已存在的数据库规则。
 
-规则层级为：`客户 -> 规则组 -> 规则`。`customers` 表保存客户名称和唯一客户编码，
-`rule_groups` 表归属到某个客户，`rules` 表保存动作描述、版本号、条件、优先级和启用状态。
-Excel 可选填写 `客户名称` 列：程序会读取该客户的规则与“通用规则”；未填写时只使用
-“通用规则”。规则按优先级从小到大执行，因此客户例外规则可设置更高优先级（如 `100`），
-在最后覆盖通用规则的结果。
+规则层级为：`客户 -> 数据预处理规则 / ERP 字段规则组 -> 规则`。
+
+- `customers`：客户代码、客户名称与启用状态；
+- `input_fields`：输入 Excel 字段字典；
+- `erp_fields`：ERP 输出字段字典，`sort_order` 只决定 Excel 列顺序；
+- `preprocess_rules`：读取 Excel 后、ERP 规则执行前的跨行处理，例如代码向上填充；
+- `field_rule_groups`：唯一键为 `(customer_id, erp_field_id)`，`execution_order` 决定字段实际处理顺序；
+- `rules`：一个规则只写入所属 ERP 字段组对应的一个输出字段，组内按 `priority` 从小到大执行。
+
+客户规则组优先；客户没有该 ERP 字段规则组时，才回退到“通用规则”。例如计划标记（子）可先执行
+默认规则 `priority=10`，再执行特殊覆盖规则 `priority=100/200`。
 
 ## DeepSeek API（可选）
 

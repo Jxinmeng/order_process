@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import os
 
 from openai import OpenAI
 
@@ -15,7 +16,10 @@ class AgnoRuleAgent:
     """使用 DeepSeek OpenAI 兼容接口执行规则编译与语义任务。"""
 
     def __init__(self, api_key: str, model_id: str, base_url: str) -> None:
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        # 规则包生成可能包含多条业务规则；给模型调用独立的超时和重试配置，
+        # 避免上游短暂波动直接导致管理员页面失败。
+        timeout = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "120"))
+        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=2)
         self._model_id = model_id
         self._system_instruction = (
             "你是严谨的订单规则编译器。遵守用户给出的字段白名单。"
@@ -26,6 +30,7 @@ class AgnoRuleAgent:
         response = self._client.chat.completions.create(
             model=self._model_id,
             temperature=0,
+            max_tokens=int(os.getenv("DEEPSEEK_MAX_TOKENS", "2400")),
             messages=[
                 {"role": "system", "content": self._system_instruction},
                 {"role": "user", "content": prompt},

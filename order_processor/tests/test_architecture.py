@@ -23,7 +23,7 @@ class ArchitectureTests(unittest.TestCase):
             if "import agno" in source.read_text(encoding="utf-8") or "from agno" in source.read_text(encoding="utf-8"):
                 agno_importers.append(source.relative_to(root).as_posix())
         self.assertEqual(
-            ["agentos.py", "infrastructure/agno_rule_agent.py"],
+            ["agentos.py"],
             agno_importers,
         )
 

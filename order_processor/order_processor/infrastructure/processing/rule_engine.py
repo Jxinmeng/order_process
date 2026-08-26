@@ -30,6 +30,8 @@ class RuleEngine:
         - field not in [a, b, c]: 不在列表中
         """
         condition = condition.strip()
+        if condition.lower() in {"always true", "无条件执行"}:
+            return True
 
         # 先分解逻辑表达式，避免把 ``and`` 后的内容当成字段名。
         if " or " in condition:

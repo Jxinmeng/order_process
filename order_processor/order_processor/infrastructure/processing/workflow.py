@@ -233,20 +233,21 @@ class OrderWorkflow:
         return [rule for rule in active_engine.match(row) if rule.task_type != "preprocess"]
 
     def _apply_preprocessing(self, rows: List[dict]) -> None:
-        """执行规则库声明的跨行输入预处理（目前为代码列向上填充）。"""
+        """执行 preprocess_rules；它们不属于任何 ERP 字段规则组。"""
+        if not self.rule_repository:
+            return
         previous_values: Dict[str, Any] = {}
         filled_count = 0
-        numbering_rules: Dict[str, tuple[Rule, List[dict]]] = {}
+        numbering_rules: Dict[str, tuple[dict, List[dict]]] = {}
         for row in rows:
-            for rule in self._rule_engine_for(row).rules:
-                if rule.task_type != "preprocess":
+            customer_code = str(row.get("客户代码") or "COMMON").strip()
+            for rule in self.rule_repository.load_active_preprocess_rules(customer_code):
+                if rule["preprocess_type"] == "number_within_contract":
+                    numbering_rules.setdefault(rule["id"], (rule, []))[1].append(row)
                     continue
-                if rule.executor_name == "number_within_contract":
-                    numbering_rules.setdefault(rule.id, (rule, []))[1].append(row)
+                if rule["preprocess_type"] != "fill_down_from_previous":
                     continue
-                if rule.executor_name != "fill_down_from_previous":
-                    continue
-                field = str(rule.executor_config.get("field") or (rule.input_fields[0] if rule.input_fields else ""))
+                field = str(rule["config"].get("field") or rule["input_field"])
                 if not field:
                     continue
                 value = row.get(field)
@@ -260,7 +261,7 @@ class OrderWorkflow:
             print(f"输入预处理: 已向上填充 {filled_count} 个代码单元格")
 
         for rule, target_rows in numbering_rules.values():
-            config = rule.executor_config
+            config = rule["config"]
             group_field = str(config.get("group_field", "合同号"))
             fallback_group = str(config.get("fallback_group_field", "计划号"))
             order_field = str(config.get("order_field", "用户订单序号"))

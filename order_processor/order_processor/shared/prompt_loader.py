@@ -39,6 +39,11 @@ class PromptLoader:
     def load_orchestrator_prompt(cls) -> str:
         """加载编排器提示词模板"""
         return cls.load("orchestrator_prompt.txt")
+
+    @classmethod
+    def load_rule_library_draft_prompt(cls) -> str:
+        """加载自然语言规则库草稿生成提示词。"""
+        return cls.load("rule_library_draft_prompt.txt")
     
     @classmethod
     def get_prompt_files(cls) -> list:

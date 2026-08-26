@@ -5982,3 +5982,428 @@ else:
     row = set_field(row, "料号", "")
     row = set_field(row, "型号", model)
 ----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-25 14:28:31
+服务商: Agno/DeepSeek
+模型: deepseek-v4-flash
+[LLM 输入]
+## 可用的最小执行单元
+
+你可以使用以下原子函数进行组合。每个函数都已经在Python环境中可用，无需import。
+
+### 日期处理
+
+- `parse_date(date_str)` : 将字符串解析为datetime对象
+  示例: dt = parse_date("2026.8.19")
+
+- `format_date(dt, fmt="%Y.%m.%d")` : 将datetime格式化为字符串
+  示例: date_str = format_date(dt)
+
+- `add_days(dt, days)` : 日期加天数
+  示例: new_dt = add_days(dt, 30)
+
+### 字段操作
+
+- `get_field(row, field, default="")` : 从字典中获取字段值
+  示例: value = get_field(row, "日期")
+
+- `set_field(row, field, value)` : 在字典中设置字段值，返回修改后的字典
+  示例: row = set_field(row, "交货日期", "2026.9.19")
+
+### 条件判断
+
+- `if_contains(value, keyword)` : 判断字符串是否包含关键词
+  示例: if if_contains(model, "客户A款"): ...
+
+- `if_equals(value, target)` : 判断字符串是否相等
+  示例: if if_equals(req, "加急"): ...
+
+### 值映射
+
+- `map_value(value, mapping)` : 根据映射表转换值
+  示例: mapped = map_value(model, {"客户A款": "A-2026-011"})
+
+### 文本、编号和工作日
+
+- `split_before(value, separator)`：取分隔符前的文本
+- `remove_prefix(value, count=1)`：移除前 count 个字符
+- `pad_left(value, length, char="0")`：左侧补齐
+- `concat(values, separator="")`：拼接非空值
+- `parse_excel_date(value)`：解析 Excel 日期序列或文本日期
+- `move_to_previous_workday(dt)`：周末前移到最近工作日
+- `previous_workday(dt)`：返回严格早于 dt 的最近一个工作日
+- `add_workdays(dt, days)`：按工作日加减天数，跳过周末
+
+### 使用规范
+
+1. 输入数据在 `row` 变量中（dict类型）
+2. 处理后的结果要写回 `row` 变量
+3. 可以组合多个原子函数
+4. 注意处理None值和异常情况
+
+
+## 规则条件
+订单号 is not blank
+
+## 规则动作
+输入订单号为纯编号，例如 20260306。生成输出订单号 = '773S-' + 输入订单号，例如 773S-20260306；只拼接一次，不重复增加前缀。
+
+## 本规则允许读取的输入字段（字段名必须完全一致）
+["订单号"]
+
+## 本规则必须写入的输出字段（字段名必须完全一致）
+["订单号"]
+
+请仅输出 Python 代码。代码必须对所有满足该规则的订单通用，不能硬编码某一条订单的
+日期、型号或订单号。输入和输出均为 `row` 字典；交期结果只能写入 `row["交货日期"]`，
+不能覆盖 `row["日期"]`，也不能创建其他日期字段。只能使用上述原子单元，无需 import。
+必须输出可直接执行的顶层语句：禁止定义 `def process`、任何其他函数或 class，禁止要求调用方再调用函数。
+本规则允许写入的输出字段仅为：["订单号"]。不得创建或写入
+其他字段；例如输出字段为 `型号` 时，必须写入 `row["型号"]`，不得写入 `ERP编码`。
+不得读取未列出的字段，不得自行改写字段名。必须为每个输出字段赋值；没有值时写入空字符串。
+涉及 Excel 输入日期时必须使用 `parse_excel_date`，不要使用 `parse_date`；日期输出使用 `format_date(dt, "%Y%m%d")`。
+
+## 型号字段的强制编排规范
+若输出字段包含“型号”，且动作描述要求对“产品型号”增加前缀或后缀：先且仅先执行
+`source_model = get_field(row, "产品型号")`，再一次性用 `set_field` 写入最终型号。
+`source_model` 是不可拆分的原文：禁止逐字符/逐子串循环替换，禁止重复拼接，禁止读取
+`row["型号"]` 作为输入，也禁止在已经生成的型号上再次加工。前缀规则应为
+`row = set_field(row, "型号", "前缀" + source_model)`，而不是 replace、for 循环或对“型号”再拼接。
+
+[LLM 原始输出]
+order_no = get_field(row, "订单号")
+if order_no and not if_contains(order_no, "773S-"):
+    row = set_field(row, "订单号", "773S-" + order_no)
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-25 14:28:39
+服务商: Agno/DeepSeek
+模型: deepseek-v4-flash
+[LLM 输入]
+## 可用的最小执行单元
+
+你可以使用以下原子函数进行组合。每个函数都已经在Python环境中可用，无需import。
+
+### 日期处理
+
+- `parse_date(date_str)` : 将字符串解析为datetime对象
+  示例: dt = parse_date("2026.8.19")
+
+- `format_date(dt, fmt="%Y.%m.%d")` : 将datetime格式化为字符串
+  示例: date_str = format_date(dt)
+
+- `add_days(dt, days)` : 日期加天数
+  示例: new_dt = add_days(dt, 30)
+
+### 字段操作
+
+- `get_field(row, field, default="")` : 从字典中获取字段值
+  示例: value = get_field(row, "日期")
+
+- `set_field(row, field, value)` : 在字典中设置字段值，返回修改后的字典
+  示例: row = set_field(row, "交货日期", "2026.9.19")
+
+### 条件判断
+
+- `if_contains(value, keyword)` : 判断字符串是否包含关键词
+  示例: if if_contains(model, "客户A款"): ...
+
+- `if_equals(value, target)` : 判断字符串是否相等
+  示例: if if_equals(req, "加急"): ...
+
+### 值映射
+
+- `map_value(value, mapping)` : 根据映射表转换值
+  示例: mapped = map_value(model, {"客户A款": "A-2026-011"})
+
+### 文本、编号和工作日
+
+- `split_before(value, separator)`：取分隔符前的文本
+- `remove_prefix(value, count=1)`：移除前 count 个字符
+- `pad_left(value, length, char="0")`：左侧补齐
+- `concat(values, separator="")`：拼接非空值
+- `parse_excel_date(value)`：解析 Excel 日期序列或文本日期
+- `move_to_previous_workday(dt)`：周末前移到最近工作日
+- `previous_workday(dt)`：返回严格早于 dt 的最近一个工作日
+- `add_workdays(dt, days)`：按工作日加减天数，跳过周末
+
+### 使用规范
+
+1. 输入数据在 `row` 变量中（dict类型）
+2. 处理后的结果要写回 `row` 变量
+3. 可以组合多个原子函数
+4. 注意处理None值和异常情况
+
+
+## 规则条件
+产品型号 is not blank
+
+## 规则动作
+产品型号就是直接输入的原始型号。只读取产品型号一次：原始型号含 J30J 时加前缀 (QJB/K)，质量等级含 /K 时加后缀 (J/K)，两个条件可同时叠加并写入同一个最终型号。不得二次加工输出字段型号。
+
+## 本规则允许读取的输入字段（字段名必须完全一致）
+["产品型号", "质量等级"]
+
+## 本规则必须写入的输出字段（字段名必须完全一致）
+["型号"]
+
+请仅输出 Python 代码。代码必须对所有满足该规则的订单通用，不能硬编码某一条订单的
+日期、型号或订单号。输入和输出均为 `row` 字典；交期结果只能写入 `row["交货日期"]`，
+不能覆盖 `row["日期"]`，也不能创建其他日期字段。只能使用上述原子单元，无需 import。
+必须输出可直接执行的顶层语句：禁止定义 `def process`、任何其他函数或 class，禁止要求调用方再调用函数。
+本规则允许写入的输出字段仅为：["型号"]。不得创建或写入
+其他字段；例如输出字段为 `型号` 时，必须写入 `row["型号"]`，不得写入 `ERP编码`。
+不得读取未列出的字段，不得自行改写字段名。必须为每个输出字段赋值；没有值时写入空字符串。
+涉及 Excel 输入日期时必须使用 `parse_excel_date`，不要使用 `parse_date`；日期输出使用 `format_date(dt, "%Y%m%d")`。
+
+## 型号字段的强制编排规范
+若输出字段包含“型号”，且动作描述要求对“产品型号”增加前缀或后缀：先且仅先执行
+`source_model = get_field(row, "产品型号")`，再一次性用 `set_field` 写入最终型号。
+`source_model` 是不可拆分的原文：禁止逐字符/逐子串循环替换，禁止重复拼接，禁止读取
+`row["型号"]` 作为输入，也禁止在已经生成的型号上再次加工。前缀规则应为
+`row = set_field(row, "型号", "前缀" + source_model)`，而不是 replace、for 循环或对“型号”再拼接。
+
+[LLM 原始输出]
+source_model = get_field(row, "产品型号")
+if source_model == "":
+    row = set_field(row, "型号", "")
+else:
+    q_level = get_field(row, "质量等级")
+    final_model = source_model
+    if if_contains(source_model, "J30J"):
+        final_model = "(QJB/K)" + final_model
+    if if_contains(q_level, "/K"):
+        final_model = final_model + "(J/K)"
+    row = set_field(row, "型号", final_model)
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-25 14:28:43
+服务商: Agno/DeepSeek
+模型: deepseek-v4-flash
+[LLM 输入]
+## 可用的最小执行单元
+
+你可以使用以下原子函数进行组合。每个函数都已经在Python环境中可用，无需import。
+
+### 日期处理
+
+- `parse_date(date_str)` : 将字符串解析为datetime对象
+  示例: dt = parse_date("2026.8.19")
+
+- `format_date(dt, fmt="%Y.%m.%d")` : 将datetime格式化为字符串
+  示例: date_str = format_date(dt)
+
+- `add_days(dt, days)` : 日期加天数
+  示例: new_dt = add_days(dt, 30)
+
+### 字段操作
+
+- `get_field(row, field, default="")` : 从字典中获取字段值
+  示例: value = get_field(row, "日期")
+
+- `set_field(row, field, value)` : 在字典中设置字段值，返回修改后的字典
+  示例: row = set_field(row, "交货日期", "2026.9.19")
+
+### 条件判断
+
+- `if_contains(value, keyword)` : 判断字符串是否包含关键词
+  示例: if if_contains(model, "客户A款"): ...
+
+- `if_equals(value, target)` : 判断字符串是否相等
+  示例: if if_equals(req, "加急"): ...
+
+### 值映射
+
+- `map_value(value, mapping)` : 根据映射表转换值
+  示例: mapped = map_value(model, {"客户A款": "A-2026-011"})
+
+### 文本、编号和工作日
+
+- `split_before(value, separator)`：取分隔符前的文本
+- `remove_prefix(value, count=1)`：移除前 count 个字符
+- `pad_left(value, length, char="0")`：左侧补齐
+- `concat(values, separator="")`：拼接非空值
+- `parse_excel_date(value)`：解析 Excel 日期序列或文本日期
+- `move_to_previous_workday(dt)`：周末前移到最近工作日
+- `previous_workday(dt)`：返回严格早于 dt 的最近一个工作日
+- `add_workdays(dt, days)`：按工作日加减天数，跳过周末
+
+### 使用规范
+
+1. 输入数据在 `row` 变量中（dict类型）
+2. 处理后的结果要写回 `row` 变量
+3. 可以组合多个原子函数
+4. 注意处理None值和异常情况
+
+
+## 规则条件
+当前日期 is not blank
+
+## 规则动作
+解析当前日期后调用 add_workdays(当前日期, 45)，格式化为 yyyyMMdd 写入交货日期。
+
+## 本规则允许读取的输入字段（字段名必须完全一致）
+["当前日期"]
+
+## 本规则必须写入的输出字段（字段名必须完全一致）
+["交货日期"]
+
+请仅输出 Python 代码。代码必须对所有满足该规则的订单通用，不能硬编码某一条订单的
+日期、型号或订单号。输入和输出均为 `row` 字典；交期结果只能写入 `row["交货日期"]`，
+不能覆盖 `row["日期"]`，也不能创建其他日期字段。只能使用上述原子单元，无需 import。
+必须输出可直接执行的顶层语句：禁止定义 `def process`、任何其他函数或 class，禁止要求调用方再调用函数。
+本规则允许写入的输出字段仅为：["交货日期"]。不得创建或写入
+其他字段；例如输出字段为 `型号` 时，必须写入 `row["型号"]`，不得写入 `ERP编码`。
+不得读取未列出的字段，不得自行改写字段名。必须为每个输出字段赋值；没有值时写入空字符串。
+涉及 Excel 输入日期时必须使用 `parse_excel_date`，不要使用 `parse_date`；日期输出使用 `format_date(dt, "%Y%m%d")`。
+
+## 型号字段的强制编排规范
+若输出字段包含“型号”，且动作描述要求对“产品型号”增加前缀或后缀：先且仅先执行
+`source_model = get_field(row, "产品型号")`，再一次性用 `set_field` 写入最终型号。
+`source_model` 是不可拆分的原文：禁止逐字符/逐子串循环替换，禁止重复拼接，禁止读取
+`row["型号"]` 作为输入，也禁止在已经生成的型号上再次加工。前缀规则应为
+`row = set_field(row, "型号", "前缀" + source_model)`，而不是 replace、for 循环或对“型号”再拼接。
+
+[LLM 原始输出]
+if get_field(row, "当前日期") != "":
+    dt = parse_excel_date(get_field(row, "当前日期"))
+    new_dt = add_workdays(dt, 45)
+    row = set_field(row, "交货日期", format_date(new_dt, "%Y%m%d"))
+else:
+    row = set_field(row, "交货日期", "")
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-26 11:23:14
+服务商: Agno/DeepSeek-语义任务
+模型: deepseek-v4-flash
+[LLM 输入]
+你是订单 ERP 规则库生成助手。
+
+任务：
+将业务人员提供的自然语言规则，转换成可由业务人员校对的 ERP 规则库草稿。你只能生成草稿；不得直接发布、不得创建或删除字段、不得杜撰字段名。
+
+重要边界：
+1. 只有“从物料长描述中截取第一个和第二个 | 之间的内容”由数据预处理阶段完成。
+2. 出现该需求时，直接使用预处理后的“型号”输入字段，不要生成截取或正则提取逻辑。
+3. 当前日期计算、日期格式转换、按合同重新编号、条件判断、字段拼接、固定值和映射，均需要生成 ERP 规则草稿。
+4. 固定值、复制、映射、清空、模板拼接优先使用直接执行器；其他复杂逻辑使用 task_type=deterministic，executor_name 为空，并在 review_note 中写明需确认的口径。
+
+字段约束：
+- 只能使用下方提供的输入字段和 ERP 输出字段，字段名称必须完全匹配。
+- 无法匹配的业务描述不得猜测，放入 unmatched_items。
+- 同一个 ERP 输出字段可有多条规则；按业务原文先后给出 priority：10、20、30……
+- always true 代表无条件执行。
+- 条件使用中文可读表达式，例如：验收要求 contains '一院'、产品型号 starts with 'RP'、备注 contains '直接发货'、质量等级 equals 'JHT'。
+- 原文中的 % 表示通配；RP%(A)% 表示“以 RP 开头且包含 (A)”。
+
+可用输入字段：
+[{"id": "input_as_order_number", "name": "AS订单号", "type": "text"}, {"id": "input_wbs_number", "name": "wbs号", "type": "text"}, {"id": "input_product_model", "name": "产品型号", "type": "text"}, {"id": "input_code", "name": "代码", "type": "text"}, {"id": "input_original_order_line", "name": "原始订单序号", "type": "text"}, {"id": "input_subtable_note", "name": "子表的备注", "type": "text"}, {"id": "input_customer_code", "name": "客户代码", "type": "text"}, {"id": "input_customer_name", "name": "客户名称", "type": "text"}, {"id": "input_minimum_package_quantity", "name": "客户提供的最小包装数量", "type": "text"}, {"id": "input_virtual_code", "name": "客户明确提供的虚拟编码", "type": "text"}, {"id": "input_project_name", "name": "客户明确提供的项目名称", "type": "text"}, {"id": "input_customer_material_code", "name": "客户物资编码", "type": "text"}, {"id": "input_customer_due_date", "name": "客户需求日期", "type": "text"}, {"id": "input_current_date", "name": "当前日期", "type": "text"}, {"id": "input_material_code", "name": "物料编号", "type": "text"}, {"id": "input_material_description", "name": "物料长描述", "type": "text"}, {"id": "input_user_order_line", "name": "用户订单序号", "type": "text"}, {"id": "input_plan_number", "name": "计划号", "type": "text"}, {"id": "input_requisition_number", "name": "请购编号", "type": "text"}, {"id": "input_purchase_quantity", "name": "采购数量", "type": "text"}, {"id": "input_acceptance_requirement", "name": "验收要求", "type": "text"}]
+
+可用 ERP 输出字段：
+[{"id": "erp_customer_code", "name": "客户编码"}, {"id": "erp_main_production_mark", "name": "生产标识（主）"}, {"id": "erp_order_number", "name": "订单号"}, {"id": "erp_main_plan_mark", "name": "计划标记（主）"}, {"id": "erp_required_date", "name": "需求日期"}, {"id": "erp_recipient", "name": "收件人"}, {"id": "erp_planning_basis", "name": "下计划依据"}, {"id": "erp_main_note", "name": "主表备注"}, {"id": "erp_line_number", "name": "明细序号"}, {"id": "erp_model", "name": "型号"}, {"id": "erp_material_number", "name": "料号"}, {"id": "erp_customer_model", "name": "客户型号"}, {"id": "erp_sub_production_mark", "name": "生产标识（子）"}, {"id": "erp_sub_plan_mark", "name": "计划标记（子）"}, {"id": "erp_order_quantity", "name": "订货数量"}, {"id": "erp_unit_price", "name": "单价"}, {"id": "erp_unit_price_excluding_tax", "name": "不含税单价"}, {"id": "erp_delivery_date", "name": "交货日期"}, {"id": "erp_minimum_package_quantity", "name": "最小包装数量"}, {"id": "erp_sub_note", "name": "子表备注"}, {"id": "erp_virtual_code", "name": "虚拟编码"}, {"id": "erp_customer_line_number", "name": "客户序号"}, {"id": "erp_material_code", "name": "物资编码"}, {"id": "erp_customer_order_due_date", "name": "客户订单需求日期"}, {"id": "erp_project_name", "name": "项目名称"}]
+
+支持的直接执行器：
+- copy_or_blank：直接复制一个输入字段
+- set_value：固定值
+- map_value：按映射表转换值
+- set_blank：清空字段
+- format_template：按模板拼接字段
+
+业务人员原始规则：
+这是一个最简单的场景
+
+示例输入：
+生产标识：JHT；主表备注：AS订单号+验收情况；验收要求包含一院时，计划标记为 YP017-X486。
+
+示例输出：
+{"summary":"生成生产标识、主表备注和计划标记三类规则","rules":[{"erp_field_id":"erp_production_mark","name":"生产标识固定为 JHT","condition":"always true","action":"生产标识固定填 JHT","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JHT"},"review_note":""},{"erp_field_id":"erp_main_note","name":"拼接主表备注","condition":"always true","action":"主表备注由 AS订单号和验收情况拼接","input_field_ids":["input_as_order_no","input_acceptance_status"],"priority":10,"task_type":"direct_atomic","executor_name":"format_template","executor_config":{"template":"{AS订单号}{验收情况}"},"review_note":"请确认是否需要连接符"},{"erp_field_id":"erp_plan_mark","name":"一院验收计划标记","condition":"验收要求 contains '一院'","action":"计划标记固定填 YP017-X486","input_field_ids":["input_acceptance_requirement"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X486"},"review_note":""}],"unmatched_items":[]}
+
+请只输出合法 JSON，不要输出 Markdown，不要解释。JSON 格式必须为：
+{"summary":"","rules":[{"erp_field_id":"","name":"","condition":"always true","action":"","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"","executor_config":{},"review_note":""}],"unmatched_items":[{"source_text":"","reason":""}]}
+
+[LLM 原始输出]
+{"summary":"生成生产标识和计划标记规则，主表备注规则因字段缺失无法生成","rules":[{"erp_field_id":"erp_main_production_mark","name":"生产标识固定为 JHT","condition":"always true","action":"生产标识固定填 JHT","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JHT"},"review_note":""},{"erp_field_id":"erp_main_plan_mark","name":"一院验收计划标记","condition":"验收要求 contains '一院'","action":"计划标记固定填 YP017-X486","input_field_ids":["input_acceptance_requirement"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X486"},"review_note":""}],"unmatched_items":[{"source_text":"主表备注：AS订单号+验收情况","reason":"无法匹配输入字段'验收情况'；可用输入字段中无对应字段"}]}
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-26 11:28:22
+服务商: Agno/DeepSeek-语义任务
+模型: deepseek-v4-flash
+[LLM 输入]
+你是订单 ERP 规则库生成助手。
+
+任务：
+将业务人员提供的自然语言规则，转换成可由业务人员校对的 ERP 规则库草稿。你只能生成草稿；不得直接发布、不得创建或删除字段、不得杜撰字段名。
+
+重要边界：
+1. 只有“从物料长描述中截取第一个和第二个 | 之间的内容”由数据预处理阶段完成。
+2. 出现该需求时，直接使用预处理后的“型号”输入字段，不要生成截取或正则提取逻辑。
+3. 当前日期计算、日期格式转换、按合同重新编号、条件判断、字段拼接、固定值和映射，均需要生成 ERP 规则草稿。
+4. 固定值、复制、映射、清空、模板拼接优先使用直接执行器；其他复杂逻辑使用 task_type=deterministic，executor_name 为空，并在 review_note 中写明需确认的口径。
+
+字段约束：
+- 只能使用下方提供的输入字段和 ERP 输出字段，字段名称必须完全匹配。
+- 无法匹配的业务描述不得猜测，放入 unmatched_items。
+- 同一个 ERP 输出字段可有多条规则；按业务原文先后给出 priority：10、20、30……
+- always true 代表无条件执行。
+- 条件使用中文可读表达式，例如：验收要求 contains '一院'、产品型号 starts with 'RP'、备注 contains '直接发货'、质量等级 equals 'JHT'。
+- 原文中的 % 表示通配；RP%(A)% 表示“以 RP 开头且包含 (A)”。
+
+可用输入字段：
+[{"id": "input_as_order_number", "name": "AS订单号", "type": "text"}, {"id": "input_wbs_number", "name": "wbs号", "type": "text"}, {"id": "input_product_model", "name": "产品型号", "type": "text"}, {"id": "input_code", "name": "代码", "type": "text"}, {"id": "input_original_order_line", "name": "原始订单序号", "type": "text"}, {"id": "input_subtable_note", "name": "子表的备注", "type": "text"}, {"id": "input_customer_code", "name": "客户代码", "type": "text"}, {"id": "input_customer_name", "name": "客户名称", "type": "text"}, {"id": "input_minimum_package_quantity", "name": "客户提供的最小包装数量", "type": "text"}, {"id": "input_virtual_code", "name": "客户明确提供的虚拟编码", "type": "text"}, {"id": "input_project_name", "name": "客户明确提供的项目名称", "type": "text"}, {"id": "input_customer_material_code", "name": "客户物资编码", "type": "text"}, {"id": "input_customer_due_date", "name": "客户需求日期", "type": "text"}, {"id": "input_current_date", "name": "当前日期", "type": "text"}, {"id": "input_material_code", "name": "物料编号", "type": "text"}, {"id": "input_material_description", "name": "物料长描述", "type": "text"}, {"id": "input_user_order_line", "name": "用户订单序号", "type": "text"}, {"id": "input_plan_number", "name": "计划号", "type": "text"}, {"id": "input_requisition_number", "name": "请购编号", "type": "text"}, {"id": "input_purchase_quantity", "name": "采购数量", "type": "text"}, {"id": "input_acceptance_requirement", "name": "验收要求", "type": "text"}]
+
+可用 ERP 输出字段：
+[{"id": "erp_customer_code", "name": "客户编码"}, {"id": "erp_main_production_mark", "name": "生产标识（主）"}, {"id": "erp_order_number", "name": "订单号"}, {"id": "erp_main_plan_mark", "name": "计划标记（主）"}, {"id": "erp_required_date", "name": "需求日期"}, {"id": "erp_recipient", "name": "收件人"}, {"id": "erp_planning_basis", "name": "下计划依据"}, {"id": "erp_main_note", "name": "主表备注"}, {"id": "erp_line_number", "name": "明细序号"}, {"id": "erp_model", "name": "型号"}, {"id": "erp_material_number", "name": "料号"}, {"id": "erp_customer_model", "name": "客户型号"}, {"id": "erp_sub_production_mark", "name": "生产标识（子）"}, {"id": "erp_sub_plan_mark", "name": "计划标记（子）"}, {"id": "erp_order_quantity", "name": "订货数量"}, {"id": "erp_unit_price", "name": "单价"}, {"id": "erp_unit_price_excluding_tax", "name": "不含税单价"}, {"id": "erp_delivery_date", "name": "交货日期"}, {"id": "erp_minimum_package_quantity", "name": "最小包装数量"}, {"id": "erp_sub_note", "name": "子表备注"}, {"id": "erp_virtual_code", "name": "虚拟编码"}, {"id": "erp_customer_line_number", "name": "客户序号"}, {"id": "erp_material_code", "name": "物资编码"}, {"id": "erp_customer_order_due_date", "name": "客户订单需求日期"}, {"id": "erp_project_name", "name": "项目名称"}]
+
+支持的直接执行器：
+- copy_or_blank：直接复制一个输入字段
+- set_value：固定值
+- map_value：按映射表转换值
+- set_blank：清空字段
+- format_template：按模板拼接字段
+
+业务人员原始规则：
+明细规则：
+
+订单号：计划号+wbs号横杠前的部分+代码，其中每个部分中间必须用-连接；
+
+计划标记：固定填写为YP017-X305-0486；
+
+主表备注：200厂已验收；
+
+型号：物料长描述内容中第一个|和第二个|之间的内容，如果截取后的内容包含J30J，则在产品型号的在前面加（QJB/K），输入质量等级包括“/K”的，型号后面加（J/K）；
+
+物料号：型号字段的值是21E6%,21E8%开头的物料号等于型号，并将型号清空，其他情况物料号为空；
+
+生产标识：固定为JHT；
+
+订货数量 ：采购数量
+
+计划标记：型号是J599%jy%的且（J/K）结尾的是YPX305/486/215，验收要求包括%一院%的是YP017-X486；其他产品是YP017-X305-0486
+
+交货日期：当前日期加45转换为 yyyyMMdd 格式；
+
+子表备注：验收要求有一院字样的写一院验收，无验收要求字段的留空
+
+
+
+特殊规则：
+
+客户订单上代码列如果有空数据，则需要填充，填充内容为前面一个有数据的单元格的内容。
+
+示例输入：
+生产标识：JHT；主表备注：AS订单号+验收情况；验收要求包含一院时，计划标记为 YP017-X486。
+
+示例输出：
+{"summary":"生成生产标识、主表备注和计划标记三类规则","rules":[{"erp_field_id":"erp_production_mark","name":"生产标识固定为 JHT","condition":"always true","action":"生产标识固定填 JHT","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JHT"},"review_note":""},{"erp_field_id":"erp_main_note","name":"拼接主表备注","condition":"always true","action":"主表备注由 AS订单号和验收情况拼接","input_field_ids":["input_as_order_no","input_acceptance_status"],"priority":10,"task_type":"direct_atomic","executor_name":"format_template","executor_config":{"template":"{AS订单号}{验收情况}"},"review_note":"请确认是否需要连接符"},{"erp_field_id":"erp_plan_mark","name":"一院验收计划标记","condition":"验收要求 contains '一院'","action":"计划标记固定填 YP017-X486","input_field_ids":["input_acceptance_requirement"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X486"},"review_note":""}],"unmatched_items":[]}
+
+请只输出合法 JSON，不要输出 Markdown，不要解释。JSON 格式必须为：
+{"summary":"","rules":[{"erp_field_id":"","name":"","condition":"always true","action":"","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"","executor_config":{},"review_note":""}],"unmatched_items":[{"source_text":"","reason":""}]}
+
+[LLM 原始输出]
+{"summary":"生成订单号、计划标记、主表备注、型号、物料号、生产标识、订货数量、交货日期、子表备注等规则；质量等级后缀和代码列填充因字段/落点不明确未生成。","rules":[{"erp_field_id":"erp_order_number","name":"拼接订单号","condition":"always true","action":"订单号=计划号-（wbs号横杠前部分）-代码","input_field_ids":["input_plan_number","input_wbs_number","input_code"],"priority":10,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"需确认wbs号横杠前部分的截取口径；订单号拼接前需先执行代码列填充。"},{"erp_field_id":"erp_main_plan_mark","name":"计划标记（主）固定值","condition":"always true","action":"计划标记（主）=YP017-X305-0486","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X305-0486"},"review_note":"原文未标注主/子计划标记，按出现位置映射为计划标记（主）。"},{"erp_field_id":"erp_main_note","name":"主表备注固定值","condition":"always true","action":"主表备注=200厂已验收","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"200厂已验收"},"review_note":""},{"erp_field_id":"erp_model","name":"型号取产品型号","condition":"always true","action":"型号=产品型号","input_field_ids":["input_product_model"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{"source_field_id":"input_product_model"},"review_note":"按预处理后的产品型号处理，不生成物料长描述截取逻辑。"},{"erp_field_id":"erp_model","name":"型号包含J30J时加前缀","condition":"产品型号 contains 'J30J'","action":"型号=（QJB/K）+产品型号","input_field_ids":["input_product_model"],"priority":20,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"质量等级字段缺失，未生成型号后面加（J/K）的规则；J30J按产品型号判断。"},{"erp_field_id":"erp_model","name":"型号开头为21E6/21E8时清空","condition":"产品型号 starts with '21E6' OR 产品型号 starts with '21E8'","action":"型号清空","input_field_ids":["input_product_model"],"priority":30,"task_type":"direct_atomic","executor_name":"set_blank","executor_config":{},"review_note":"根据物料号规则同步清空型号。"},{"erp_field_id":"erp_material_number","name":"物料号等于型号","condition":"产品型号 starts with '21E6' OR 产品型号 starts with '21E8'","action":"物料号=产品型号","input_field_ids":["input_product_model"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{"source_field_id":"input_product_model"},"review_note":"按原文21E6%、21E8%理解为前缀匹配，以产品型号作为型号字段值。"},{"erp_field_id":"erp_material_number","name":"其他情况物料号为空","condition":"NOT (产品型号 starts with '21E6' OR 产品型号 starts with '21E8')","action":"物料号留空","input_field_ids":["input_product_model"],"priority":20,"task_type":"direct_atomic","executor_name":"set_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_main_production_mark","name":"生产标识固定值","condition":"always true","action":"生产标识=JHT","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JHT"},"review_note":"原文未标注主/子生产标识，按主表生产标识处理。"},{"erp_field_id":"erp_order_quantity","name":"订货数量复制采购数量","condition":"always true","action":"订货数量=采购数量","input_field_ids":["input_purchase_quantity"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{"source_field_id":"input_purchase_quantity"},"review_note":""},{"erp_field_id":"erp_sub_plan_mark","name":"计划标记（子）J599规则","condition":"产品型号 starts with 'J599' AND 产品型号 contains 'jy' AND 产品型号 ends with '（J/K）'","action":"计划标记（子）=YPX305/486/215","input_field_ids":["input_product_model"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YPX305/486/215"},"review_note":"原文未标注主/子计划标记，按出现位置映射为计划标记（子）；J/K结尾按产品型号判断，质量等级字段缺失时需确认。"},{"erp_field_id":"erp_sub_plan_mark","name":"计划标记（子）一院验收规则","condition":"验收要求 contains '一院'","action":"计划标记（子）=YP017-X486","input_field_ids":["input_acceptance_requirement"],"priority":20,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X486"},"review_note":"原文未标注主/子计划标记，按出现位置映射为计划标记（子）。"},{"erp_field_id":"erp_sub_plan_mark","name":"计划标记（子）其他产品规则","condition":"NOT (产品型号 starts with 'J599' AND 产品型号 contains 'jy' AND 产品型号 ends with '（J/K）') AND NOT (验收要求 contains '一院')","action":"计划标记（子）=YP017-X305-0486","input_field_ids":["input_product_model","input_acceptance_requirement"],"priority":30,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X305-0486"},"review_note":"原文未标注主/子计划标记，按出现位置映射为计划标记（子）。"},{"erp_field_id":"erp_delivery_date","name":"交货日期当前日期加45天","condition":"always true","action":"交货日期=当前日期+45天，格式yyyyMMdd","input_field_ids":["input_current_date"],"priority":10,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"请确认按自然日计算加45天，输出格式为yyyyMMdd。"},{"erp_field_id":"erp_sub_note","name":"子表备注一院验收","condition":"验收要求 contains '一院'","action":"子表备注=一院验收","input_field_ids":["input_acceptance_requirement"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"一院验收"},"review_note":""},{"erp_field_id":"erp_sub_note","name":"子表备注无验收要求留空","condition":"验收要求 is empty","action":"子表备注留空","input_field_ids":["input_acceptance_requirement"],"priority":20,"task_type":"direct_atomic","executor_name":"set_blank","executor_config":{},"review_note":"原规则仅说明无验收要求字段时留空；若需对非空且不含“一院”的验收要求也留空，请确认。"}],"unmatched_items":[{"source_text":"输入质量等级包括“/K”的，型号后面加（J/K）；","reason":"可用输入字段中不存在“质量等级”字段，无法生成“型号后面加（J/K）”规则。"},{"source_text":"客户订单上代码列如果有空数据，则需要填充，填充内容为前面一个有数据的单元格的内容。","reason":"“代码列”为输入字段，且该规则需要跨行前值填充，不直接对应ERP输出字段，无法生成规则。"}]}
+----------------------------------------------------------------------

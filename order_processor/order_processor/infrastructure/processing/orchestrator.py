@@ -37,11 +37,13 @@ class LLMOrchestrator:
         try:
             self.atomic_units_doc = PromptLoader.load_atomic_units_doc()
             self.orchestrator_template = PromptLoader.load_orchestrator_prompt()
+            self.rule_library_draft_template = PromptLoader.load_rule_library_draft_prompt()
         except FileNotFoundError as e:
             print(f"⚠️ 提示词文件加载失败: {e}")
             print("使用默认提示词...")
             self.atomic_units_doc = self._get_default_atomic_doc()
             self.orchestrator_template = self._get_default_template()
+            self.rule_library_draft_template = "Convert the business rule text to JSON rule drafts only."
     
     def _get_default_atomic_doc(self) -> str:
         """默认原子函数说明书"""
@@ -173,6 +175,16 @@ class LLMOrchestrator:
             log_llm_exchange("Agno/DeepSeek-语义任务", self.model, prompt, content)
             return content
         raise RuntimeError("语义任务需要已配置的 DEEPSEEK_API_KEY 与 agno 依赖")
+
+    def draft_rule_library(self, customer_code: str, business_rule_text: str, input_fields: list[dict], erp_fields: list[dict]) -> str:
+        """将业务自然语言转换为待校对的规则库 JSON 草稿。"""
+        prompt = self.rule_library_draft_template.format(
+            customer_code=customer_code,
+            business_rule_text=business_rule_text,
+            input_fields_json=json.dumps(input_fields, ensure_ascii=False),
+            erp_fields_json=json.dumps(erp_fields, ensure_ascii=False),
+        )
+        return self.understand_json(prompt)
     
     def orchestrate(self, row: dict, actions: List[str]) -> str:
         """编排：根据动作描述生成代码"""
