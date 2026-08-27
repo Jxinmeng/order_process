@@ -108,6 +108,10 @@ class RuleEngine:
             if rule.enabled and self._eval_condition(rule.condition, row):
                 matched.append(rule)
         return matched
+
+    def matches_rule(self, rule: Rule, row: dict) -> bool:
+        """判断单条规则是否匹配当前（可能已被前序规则更新的）行数据。"""
+        return rule.enabled and self._eval_condition(rule.condition, row)
     
     def get_actions(self, row: dict) -> List[str]:
         """

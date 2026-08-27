@@ -13,6 +13,11 @@ class TaskRouter:
     def __init__(self, orchestrator: LLMOrchestrator, repository: RuleRepository | None):
         self.orchestrator, self.repository = orchestrator, repository
         self.memory_cache: dict[tuple[str, str], str] = {}
+        self.runtime_state: dict = {}
+
+    def reset_runtime_state(self) -> None:
+        """新文件开始时清除仅限本批次使用的跨行规则状态。"""
+        self.runtime_state.clear()
 
     def execute(self, rule: Rule, row: dict) -> tuple[dict, str]:
         inputs = {name: row.get(name) for name in rule.input_fields} if rule.input_fields else row.copy()
@@ -27,7 +32,7 @@ class TaskRouter:
             result, trace = self._semantic(rule, inputs)
         elif rule.task_type == "deterministic":
             code = self._compiled_code(rule)
-            executed = CodeExecutor.execute(code, inputs)
+            executed = CodeExecutor.execute(code, inputs, self.runtime_state)
             if not executed["success"]:
                 raise RuntimeError(executed["error"])
             result, trace = executed["data"], code

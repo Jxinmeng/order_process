@@ -36,10 +36,25 @@ class OrderWorkflow:
         """
         # 1. 规则匹配 → 获取动作描述
         rule_engine = self._rule_engine_for(row)
-        matched_rules = self._matched_rules(row, rule_engine)
-        actions = [r.action_description for r in matched_rules]
-        rule_names = [r.name for r in matched_rules]
-        
+        # 2. 按规则顺序执行。后续条件可能依赖前序刚写入的 ERP 字段，
+        # 例如先初始化“型号”，再判断“型号”是否包含 J30/J29。
+        code_parts, processed_row = [], row.copy()
+        matched_rules: list[Rule] = []
+        try:
+            for rule in rule_engine.rules:
+                if not rule_engine.matches_rule(rule, processed_row):
+                    continue
+                matched_rules.append(rule)
+                changes, trace = self.task_router.execute(rule, processed_row)
+                processed_row.update(changes)
+                code_parts.append(trace)
+            result = {"success": True, "data": processed_row, "error": None}
+        except Exception as error:
+            result = {"success": False, "data": row, "error": str(error)}
+        code = "\n\n".join(code_parts)
+        actions = [rule.action_description for rule in matched_rules]
+        rule_names = [rule.name for rule in matched_rules]
+
         if not actions:
             return ProcessResult(
                 success=False,
@@ -49,18 +64,6 @@ class OrderWorkflow:
                 matched_rules=[],
                 generated_code=""
             )
-        
-        # 2. LLM编排 → 生成代码
-        code_parts, processed_row = [], row.copy()
-        try:
-            for rule in matched_rules:
-                changes, trace = self.task_router.execute(rule, processed_row)
-                processed_row.update(changes)
-                code_parts.append(trace)
-            result = {"success": True, "data": processed_row, "error": None}
-        except Exception as error:
-            result = {"success": False, "data": row, "error": str(error)}
-        code = "\n\n".join(code_parts)
 
         if result["success"]:
             processed_row = self._ensure_delivery_date(actions, result["data"])
@@ -99,6 +102,8 @@ class OrderWorkflow:
         print(f"  输出: {output_path}")
         print("=" * 70)
         
+        # 同一工作流实例可以处理多个文件；跨行规则状态不能泄漏到下一文件。
+        self.task_router.reset_runtime_state()
         # 1. 读取
         rows = self.reader.read(input_path)
         self._apply_preprocessing(rows)
@@ -115,18 +120,15 @@ class OrderWorkflow:
         for idx, row in enumerate(rows, 1):
             print(f"\n行 {idx}: order_id={row.get('order_id', '')}")
             
-            # 打印匹配的规则
-            matched = self._matched_rules(row)
-            if matched:
-                print(f"  匹配规则: {', '.join([r.name for r in matched])}")
-                for r in matched:
-                    print(f"    → 动作: {r.action_description}")
-            else:
-                print("  未匹配到规则")
-            
             # 处理
             result = self.process_row(row)
             results.append(result)
+
+            # 使用实际执行后的匹配结果；其中可能包含依赖前序 ERP 输出的规则。
+            if result.matched_rules:
+                print(f"  匹配规则: {', '.join(result.matched_rules)}")
+            else:
+                print("  未匹配到规则")
             
             # 打印结果
             if result.success and result.data:
@@ -162,10 +164,14 @@ class OrderWorkflow:
         }
 
     def _write_output_files(self, output_data: List[dict], output_path: str) -> List[str]:
-        """存在多个合同号时，按合同号分别输出 Excel 文件。"""
+        """存在多个合同编号时，按 ERP 订单号分别输出 Excel 文件。"""
         grouped: Dict[str, List[dict]] = {}
         for row in output_data:
-            contract = str(row.get("合同号") or "").strip()
+            # ERP 规则会将“合同编号”写入“订单号”。兼容保留字段名，
+            # 以便历史输出或后续客户专用字段也能按合同编号拆分。
+            contract = str(
+                row.get("订单号") or row.get("合同编号") or row.get("合同号") or ""
+            ).strip()
             if contract:
                 grouped.setdefault(contract, []).append(row)
         if len(grouped) <= 1:

@@ -1,6 +1,8 @@
 """开发者预置的复杂业务执行器。"""
 
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
+import re
 
 from order_processor.infrastructure.processing.atomic_units import AtomicUnits
 
@@ -38,6 +40,35 @@ def calculate_complex_delivery(row: dict) -> dict:
 
 
 EXECUTORS = {"calculate_complex_delivery": calculate_complex_delivery}
+
+
+def normalize_j30_j29_length(row: dict) -> dict:
+    """规范 J30/J29 型号中的长度为 ``(L毫米值)``。"""
+    model = _value(row, "型号")
+    if "J30" not in model and "J29" not in model:
+        return row
+
+    pattern = re.compile(
+        r"(?:\(\s*)?L\s*=\s*(\d+(?:\.\d+)?)\s*(mm|m)\s*\)?",
+        re.IGNORECASE,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        try:
+            value = Decimal(match.group(1))
+        except InvalidOperation:
+            return match.group(0)
+        millimetres = value * 1000 if match.group(2).lower() == "m" else value
+        normalized = format(millimetres.normalize(), "f")
+        if "." in normalized:
+            normalized = normalized.rstrip("0").rstrip(".")
+        return f"(L{normalized or '0'})"
+
+    row["型号"] = pattern.sub(replace, model)
+    return row
+
+
+EXECUTORS["normalize_j30_j29_length"] = normalize_j30_j29_length
 
 
 def transform_master_detail_order(row: dict) -> dict:

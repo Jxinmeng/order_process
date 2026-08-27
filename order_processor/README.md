@@ -50,8 +50,8 @@ python main.py --input "D:\订单\待处理订单.xlsx" --output "D:\订单\处�
 - `field_rule_groups`：唯一键为 `(customer_id, erp_field_id)`，`execution_order` 决定字段实际处理顺序；
 - `rules`：一个规则只写入所属 ERP 字段组对应的一个输出字段，组内按 `priority` 从小到大执行。
 
-客户规则组优先；客户没有该 ERP 字段规则组时，才回退到“通用规则”。例如计划标记（子）可先执行
-默认规则 `priority=10`，再执行特殊覆盖规则 `priority=100/200`。
+同一字段先执行“通用规则”，再执行客户规则组中的规则；客户规则可用更高优先级覆盖默认值。
+例如计划标记（子）可先执行默认规则 `priority=10`，再执行特殊覆盖规则 `priority=100/200`。
 
 ## DeepSeek API（可选）
 

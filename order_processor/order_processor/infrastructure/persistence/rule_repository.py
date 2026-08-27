@@ -24,10 +24,11 @@ class RuleRepository:
                 self._migrate_legacy_rule_groups(conn)
             self._create_schema(conn)
             self._ensure_erp_field_ownership_column(conn)
+            self._repair_legacy_rule_field_lists(conn)
             self._create_view(conn)
 
     def load_active_rules(self, customer_code: str = "COMMON") -> List[Rule]:
-        """按规则组业务顺序、再按组内优先级读取 ERP 规则。"""
+        """按规则组业务顺序读取 COMMON 默认规则，再读取客户覆盖规则。"""
         query = """
             SELECT r.id, r.name, r.condition_expression, r.action_description,
                    r.priority, r.enabled, r.version, r.compiled_code, r.task_type,
@@ -35,22 +36,14 @@ class RuleRepository:
               FROM rules r
               JOIN field_rule_groups g ON g.id = r.field_rule_group_id AND g.enabled = 1
               JOIN customers c ON c.id = g.customer_id AND c.enabled = 1
-             WHERE r.enabled = 1 AND (
-                 c.customer_code = ? OR
-                 (c.customer_code = 'COMMON' AND NOT EXISTS (
-                    SELECT 1 FROM field_rule_groups cg
-                    JOIN customers cc ON cc.id = cg.customer_id
-                    WHERE cc.customer_code = ? AND cc.enabled = 1 AND cg.enabled = 1
-                      AND cg.erp_field_id = g.erp_field_id
-                 ))
-             )
+             WHERE r.enabled = 1 AND c.customer_code IN ('COMMON', ?)
                ORDER BY g.execution_order,
                         CASE WHEN c.customer_code = 'COMMON' THEN 0 ELSE 1 END,
                         r.priority, r.id
         """
         with self._connect() as conn:
             names = self._field_display_names(conn)
-            return [self._rule_from_row(row, names) for row in conn.execute(query, (customer_code, customer_code))]
+            return [self._rule_from_row(row, names) for row in conn.execute(query, (customer_code,))]
 
     def load_active_preprocess_rules(self, customer_code: str) -> list[dict[str, Any]]:
         """预处理规则在 Excel 读取后、ERP 字段规则执行前运行。"""
@@ -264,6 +257,24 @@ class RuleRepository:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(erp_fields)")}
         if "owner_customer_code" not in columns:
             conn.execute("ALTER TABLE erp_fields ADD COLUMN owner_customer_code TEXT")
+
+    @staticmethod
+    def _repair_legacy_rule_field_lists(conn: sqlite3.Connection) -> None:
+        """修复历史页面把单个字段 ID 写成 ``[field_id]`` 的错误格式。"""
+        for column in ("input_fields", "output_fields"):
+            for rule_id, raw_value in conn.execute(f"SELECT id,{column} FROM rules"):
+                try:
+                    json.loads(raw_value or "[]")
+                    continue
+                except json.JSONDecodeError:
+                    pass
+                match = re.fullmatch(r"\[([A-Za-z0-9_-]+)\]", (raw_value or "").strip())
+                if not match:
+                    raise ValueError(f"规则 {rule_id} 的 {column} 不是合法 JSON：{raw_value!r}")
+                conn.execute(
+                    f"UPDATE rules SET {column}=? WHERE id=?",
+                    (json.dumps([match.group(1)], ensure_ascii=False), rule_id),
+                )
 
     @staticmethod
     def _validate_erp_owner(conn: sqlite3.Connection, owner_customer_code: str | None) -> None:

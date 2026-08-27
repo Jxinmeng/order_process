@@ -21,6 +21,8 @@ from order_processor.infrastructure.persistence.rule_repository import RuleRepos
 from order_processor.infrastructure.processing.workflow import OrderWorkflow
 from order_processor.infrastructure.processing.developer_executors import EXECUTORS as DEVELOPER_EXECUTORS
 from order_processor.infrastructure.processing.orchestrator import LLMOrchestrator
+from order_processor.interfaces.rule_draft_parser import parse_rule_draft
+from order_processor.interfaces.rule_file_reader import read_rule_file
 from order_processor.shared.settings import load_project_env
 
 
@@ -28,6 +30,7 @@ def register_web_ui(app: FastAPI, project_root: Path) -> None:
     input_dir, output_dir = project_root / "input", project_root / "output"
     admin_sessions: set[str] = set()
     rule_draft_packages: dict[str, tuple[str, list[dict]]] = {}
+    rule_file_imports: dict[str, tuple[str, str, str]] = {}
     direct_executors = {"copy_or_blank", "map_value", "set_value", "classify_c003_contract", "format_template", "set_blank"}
 
     def require_admin(admin_session: str | None = Cookie(default=None)) -> None:
@@ -126,20 +129,20 @@ def register_web_ui(app: FastAPI, project_root: Path) -> None:
     def render_rule_package(customer_code: str, requirement: str, rules: list[dict]) -> HTMLResponse:
         package_id = uuid4().hex
         rule_draft_packages[package_id] = (customer_code, rules)
-        cards = "".join(f"<details class='rule'><summary>{index + 1}. {escape(str(rule.get('name', 'AI 规则草稿')))} <span>{escape(str(rule.get('condition', 'always true')))}</span></summary><label>条件<textarea data-key='condition'>{escape(str(rule.get('condition', 'always true')))}</textarea></label><label>结果<textarea data-key='action'>{escape(str(rule.get('action', '')))}</textarea></label><button type='button' class='delete'>删除此规则</button><input type='hidden' data-key='index' value='{index}'></details>" for index, rule in enumerate(rules))
-        return HTMLResponse("""<!doctype html><meta charset='utf-8'><title>校对规则包</title><style>body{font:14px/1.4 system-ui;max-width:900px;margin:24px auto;background:#f6f8fc;padding:0 20px}.rule{background:#fff;border:1px solid #dfe7f3;border-radius:9px;padding:10px 12px;margin:8px 0}.rule summary{font-weight:650;cursor:pointer}.rule summary span{color:#60708a;font-weight:400;margin-left:10px}label{display:block;margin:7px 0;font-weight:600}textarea{display:block;width:100%;min-height:54px;margin-top:3px;padding:7px}button{padding:8px 11px;border:0;border-radius:7px;background:#1769e0;color:#fff;cursor:pointer}.delete{background:#fff;color:#b42318;border:1px solid #f1b9b3}.hint{color:#60708a}</style><p><a href='/admin'>← 返回管理端</a></p><h1>校对规则包</h1><p class='hint'>已生成 """ + str(len(rules)) + """ 条草稿。点击规则展开校对；确认后一次性发布。</p><p class='hint'>""" + escape(requirement) + """</p><form method='post' action='/admin/ai-rule-package/publish' id='publish'><input type='hidden' name='package_id' value='""" + package_id + """'><input type='hidden' name='rules_json' id='rules_json'>""" + cards + """<button>确认并发布全部规则</button></form><script>document.querySelectorAll('.delete').forEach(b=>b.onclick=()=>b.closest('.rule').remove());document.querySelector('#publish').onsubmit=()=>{let base=""" + json.dumps(rules, ensure_ascii=False) + """;document.querySelectorAll('.rule').forEach(c=>{let i=+c.querySelector('[data-key=index]').value;base[i].condition=c.querySelector('[data-key=condition]').value;base[i].action=c.querySelector('[data-key=action]').value});let kept=[...document.querySelectorAll('.rule')].map(c=>base[+c.querySelector('[data-key=index]').value]);document.querySelector('#rules_json').value=JSON.stringify(kept)}</script>""")
+        def task_type_options(selected: str) -> str:
+            return "".join(f"<option value='{value}' {'selected' if value == selected else ''}>{label}</option>" for value, label in (("direct_atomic", "直接执行"), ("deterministic", "模型编排"), ("developer_executor", "开发者执行器"), ("semantic", "语义理解")))
 
-    @app.post("/admin/ai-rule-draft", response_class=HTMLResponse, include_in_schema=False)
-    def generate_rule_draft(customer_code: str = Form(...), requirement: str = Form(""), rules_file: UploadFile | None = File(None), _: None = Depends(require_admin)) -> HTMLResponse:
-        if rules_file and rules_file.filename:
-            if not rules_file.filename.lower().endswith(".txt"):
-                raise HTTPException(400, "仅支持上传 TXT 规则文件")
-            try:
-                requirement = rules_file.file.read().decode("utf-8-sig").strip()
-            except UnicodeDecodeError as error:
-                raise HTTPException(400, "TXT 文件必须使用 UTF-8 编码") from error
+        cards = "".join(f"<details class='rule'><summary>{index + 1}. {escape(str(rule.get('name', 'AI 规则草稿')))} <span>{escape(str(rule.get('condition', 'always true')))}</span></summary><label>规则名称<input data-key='name' value='{escape(str(rule.get('name', 'AI 规则草稿')))}'></label><label>输出 ERP 字段 ID<input data-key='erp_field_id' value='{escape(str(rule.get('erp_field_id', '')))}'></label><label>优先级<input data-key='priority' type='number' value='{escape(str(rule.get('priority', 10)))}'></label><label>执行方式<select data-key='task_type'>{task_type_options(str(rule.get('task_type') or 'deterministic'))}</select></label><label>执行器名称<input data-key='executor_name' value='{escape(str(rule.get('executor_name') or ''))}' placeholder='例如 set_value'></label><label>依赖字段 ID（JSON 数组）<textarea data-key='input_field_ids'>{escape(json.dumps(rule.get('input_field_ids') or [], ensure_ascii=False))}</textarea></label><label>执行器配置（JSON）<textarea data-key='executor_config'>{escape(json.dumps(rule.get('executor_config') or {}, ensure_ascii=False))}</textarea></label><label>条件<textarea data-key='condition'>{escape(str(rule.get('condition', 'always true')))}</textarea></label><label>结果<textarea data-key='action'>{escape(str(rule.get('action', '')))}</textarea></label><label><input data-key='enabled' type='checkbox' {'checked' if rule.get('enabled', True) else ''}> 发布后立即启用</label><button type='button' class='delete'>删除此规则</button><input type='hidden' data-key='index' value='{index}'></details>" for index, rule in enumerate(rules))
+        return HTMLResponse("""<!doctype html><meta charset='utf-8'><title>校对规则包</title><style>body{font:14px/1.4 system-ui;max-width:900px;margin:24px auto;background:#f6f8fc;padding:0 20px}.rule{background:#fff;border:1px solid #dfe7f3;border-radius:9px;padding:10px 12px;margin:8px 0}.rule summary{font-weight:650;cursor:pointer}.rule summary span{color:#60708a;font-weight:400;margin-left:10px}label{display:block;margin:7px 0;font-weight:600}textarea,input,select{display:block;width:100%;box-sizing:border-box;min-height:36px;margin-top:3px;padding:7px;border:1px solid #cbd5e1;border-radius:6px}textarea{min-height:54px}input[type=checkbox]{display:inline;width:auto;min-height:auto}button{padding:8px 11px;border:0;border-radius:7px;background:#1769e0;color:#fff;cursor:pointer}.delete{background:#fff;color:#b42318;border:1px solid #f1b9b3}.hint{color:#60708a}</style><p><a href='/admin'>← 返回管理端</a></p><h1>校对规则包</h1><p class='hint'>可修改条件、动作说明及完整执行定义；确认后一次性发布。</p><p class='hint'>""" + escape(requirement) + """</p><form method='post' action='/admin/ai-rule-package/publish' id='publish'><input type='hidden' name='package_id' value='""" + package_id + """'><input type='hidden' name='rules_json' id='rules_json'>""" + cards + """<button>确认并发布全部规则</button></form><script>document.querySelectorAll('.delete').forEach(b=>b.onclick=()=>b.closest('.rule').remove());document.querySelector('#publish').onsubmit=e=>{let base=""" + json.dumps(rules, ensure_ascii=False) + """;try{document.querySelectorAll('.rule').forEach(c=>{let i=+c.querySelector('[data-key=index]').value,r=base[i];for(const k of ['name','erp_field_id','priority','task_type','executor_name','condition','action'])r[k]=c.querySelector('[data-key='+k+']').value;r.input_field_ids=JSON.parse(c.querySelector('[data-key=input_field_ids]').value||'[]');r.executor_config=JSON.parse(c.querySelector('[data-key=executor_config]').value||'{}');r.enabled=c.querySelector('[data-key=enabled]').checked});document.querySelector('#rules_json').value=JSON.stringify([...document.querySelectorAll('.rule')].map(c=>base[+c.querySelector('[data-key=index]').value]))}catch(err){e.preventDefault();alert('依赖字段和执行器配置必须是合法 JSON：'+err.message)}}</script>""")
+
+    def render_rule_import_preview(customer_code: str, filename: str, requirement: str) -> HTMLResponse:
+        import_id = uuid4().hex
+        rule_file_imports[import_id] = (customer_code, filename, requirement)
+        return HTMLResponse("""<!doctype html><meta charset='utf-8'><title>确认导入规则</title><style>body{font:14px/1.5 system-ui;max-width:960px;margin:28px auto;background:#f6f8fc;padding:0 20px}.card{background:#fff;border:1px solid #dfe7f3;border-radius:10px;padding:18px}pre{white-space:pre-wrap;word-break:break-word;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;max-height:65vh;overflow:auto}button{padding:9px 13px;border:0;border-radius:7px;background:#1769e0;color:#fff;font-weight:650;cursor:pointer}.hint{color:#60708a}</style><p><a href='/admin'>← 重新选择文件</a></p><div class='card'><h1>确认导入内容</h1><p class='hint'>文件：""" + escape(filename) + """。以下文字会原样发送给 AI；如果不是你的规则，请返回并选择正确的工作表文件。</p><pre>""" + escape(requirement) + """</pre><form method='post' action='/admin/ai-rule-imports/""" + import_id + """/generate'><button>确认使用以上规则生成草稿</button></form></div>""")
+
+    def generate_rule_package(customer_code: str, requirement: str) -> HTMLResponse:
         if not requirement.strip():
-            raise HTTPException(400, "请粘贴业务规则或上传 TXT 文件")
+            raise HTTPException(400, "请粘贴业务规则或上传规则文件")
         repo = RuleRepository(project_root / "data" / "rules.db")
         repo.initialize()
         catalog = repo.field_catalog()
@@ -147,15 +150,31 @@ def register_web_ui(app: FastAPI, project_root: Path) -> None:
         outputs = [{"id": field_id, "name": name} for field_id, name, _, owner, enabled in catalog["erp"] if enabled and (owner is None or owner == customer_code)]
         try:
             raw = LLMOrchestrator(os.getenv("DEEPSEEK_API_KEY")).draft_rule_library(customer_code, requirement, inputs, outputs)
-            draft = json.loads(raw)
-            if not isinstance(draft, dict):
-                raise ValueError("模型未返回 JSON 对象")
+            draft = parse_rule_draft(raw)
         except Exception as error:
             status = 504 if "timed out" in str(error).lower() else 502
             hint = "模型接口响应超时，请稍后重试；也可先将规则拆成较小的规则包生成。" if status == 504 else str(error)
             raise HTTPException(status, f"生成规则草稿失败：{hint}") from error
         rules = draft.get("rules") if isinstance(draft.get("rules"), list) else [draft]
         return render_rule_package(customer_code, requirement, [rule for rule in rules if isinstance(rule, dict)])
+
+    @app.post("/admin/ai-rule-draft", response_class=HTMLResponse, include_in_schema=False)
+    def generate_rule_draft(customer_code: str = Form(...), requirement: str = Form(""), rules_file: UploadFile | None = File(None), _: None = Depends(require_admin)) -> HTMLResponse:
+        if rules_file is not None and rules_file.filename:
+            try:
+                requirement = read_rule_file(rules_file.filename, rules_file.file.read())
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from error
+            return render_rule_import_preview(customer_code, rules_file.filename, requirement)
+        return generate_rule_package(customer_code, requirement)
+
+    @app.post("/admin/ai-rule-imports/{import_id}/generate", response_class=HTMLResponse, include_in_schema=False)
+    def generate_imported_rule_draft(import_id: str, _: None = Depends(require_admin)) -> HTMLResponse:
+        imported = rule_file_imports.pop(import_id, None)
+        if not imported:
+            raise HTTPException(400, "导入预览已失效，请重新上传规则文件")
+        customer_code, _, requirement = imported
+        return generate_rule_package(customer_code, requirement)
 
     @app.post("/admin/ai-rule-package/publish", include_in_schema=False)
     def publish_rule_package(package_id: str = Form(...), rules_json: str = Form(...), _: None = Depends(require_admin)) -> RedirectResponse:
@@ -173,11 +192,22 @@ def register_web_ui(app: FastAPI, project_root: Path) -> None:
         for rule in rules:
             field = str(rule.get("erp_field_id", ""))
             if field not in erp: raise HTTPException(400, f"草稿包含未知 ERP 字段：{field}")
+            executor_name = str(rule.get("executor_name") or "")
+            if executor_name and executor_name not in direct_executors | set(DEVELOPER_EXECUTORS):
+                raise HTTPException(400, "请选择系统已支持的执行器名称")
+            task_type = str(rule.get("task_type") or "deterministic")
+            if task_type not in {"direct_atomic", "deterministic", "developer_executor", "semantic"}:
+                raise HTTPException(400, "执行方式无效")
+            config = rule.get("executor_config") or {}
+            if not isinstance(config, dict):
+                raise HTTPException(400, "执行器配置必须是 JSON 对象")
+            if not isinstance(rule.get("input_field_ids", []), list):
+                raise HTTPException(400, "依赖字段必须是 JSON 数组")
             # 后续规则可读取已经生成的 ERP 输出状态（例如“型号”初始化后再判断型号）。
             used = [value for value in rule.get("input_field_ids", []) if value in inputs | erp]
             group = next((row for row in repo.field_catalog()["groups"] if row[1] == customer_code and row[2] == field), None)
             group_id = group[0] if group else repo.create_field_rule_group(customer_code, field)
-            repo.create_rule(group_id, str(rule.get("name") or "AI 规则"), str(rule.get("condition") or "always true"), str(rule.get("action") or ""), used, int(rule.get("priority") or 10), str(rule.get("task_type") or "deterministic"), str(rule.get("executor_name") or "") or None, json.dumps(rule.get("executor_config") or {}, ensure_ascii=False), True)
+            repo.create_rule(group_id, str(rule.get("name") or "AI 规则"), str(rule.get("condition") or "always true"), str(rule.get("action") or ""), used, int(rule.get("priority") or 10), task_type, executor_name or None, json.dumps(config, ensure_ascii=False), bool(rule.get("enabled", True)))
         return RedirectResponse("/admin", status_code=303)
 
     @app.post("/admin/ai-rule-draft/publish", include_in_schema=False)
@@ -261,12 +291,12 @@ def register_web_ui(app: FastAPI, project_root: Path) -> None:
         other_section = "<details class='card'><summary>预处理规则与全部规则清单</summary><h3>预处理规则</h3>" + table(["规则 ID", "客户", "类型", "执行顺序", "启用"], data["preprocess_rules"]) + "<h3>全部规则</h3>" + table(["客户", "ERP 字段", "规则名称", "条件", "优先级", "启用"], data["rules"]) + "</details>"
         return HTMLResponse("""<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>业务规则管理</title><style>body{font:14px/1.4 system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:1100px;margin:0 auto;padding:22px;background:#f6f8fc;color:#172033}.card,details{background:#fff;border:1px solid #e1e7f0;border-radius:10px;padding:13px;margin:9px 0}summary{cursor:pointer;font-size:16px;font-weight:700}h1,h2,h3,p{margin:0 0 7px}.hint{color:#60708a}form{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:8px 0}label{display:grid;gap:3px;font-weight:600}input,select,textarea,button{font:inherit;padding:7px 8px;border:1px solid #cbd5e1;border-radius:7px}textarea{min-width:240px;min-height:58px}button{background:#1769e0;color:white;border:0;font-weight:650}.inline-form{margin:0}.customer-table{width:100%;border-collapse:collapse}.customer-table td,.customer-table th{padding:7px;border-bottom:1px solid #e8edf5;text-align:left}.customer-table input{max-width:260px}.editor-row{padding:7px;border:1px solid #e5eaf2;border-radius:7px}</style><body><h1>业务规则管理</h1><p class='hint'>先选择或新增客户，再用自然语言生成规则草稿。</p>""" +
             "<section class='card'><h2>客户</h2><form method='post' action='/admin/customers'><label>客户代码<input name='code' placeholder='例如 C004' required></label><label>客户名称<input name='name' placeholder='例如 航天四院' required></label><button>新增客户</button></form>" + customer_table + "</section>" +
-            "<section class='card'><h2>AI 生成规则</h2><p class='hint'>粘贴业务规则或上传 TXT；生成后逐条展开校对，确认后再发布。</p><form id='ai-rule-form' method='post' action='/admin/ai-rule-draft' enctype='multipart/form-data'><label>客户<select name='customer_code'>" + business_customer_options + "</select></label><label>业务规则<textarea name='requirement' placeholder='例如：验收要求包含一院时，计划标记填 YP017-X486。'></textarea></label><label>或上传 TXT<input name='rules_file' type='file' accept='.txt,text/plain'></label><button id='ai-rule-button'>生成规则草稿</button><span id='ai-rule-status' class='hint'></span></form></section>" + manual_rules + input_fields_section + erp_fields_section + other_section + "<script>const f=document.querySelector('#ai-rule-form');f.onsubmit=()=>{const b=document.querySelector('#ai-rule-button'),s=document.querySelector('#ai-rule-status');b.disabled=true;b.textContent='正在生成…';s.textContent='正在读取规则并调用模型，通常需要 10–60 秒；较长规则包可能更久。';setTimeout(()=>{if(b.disabled)s.textContent='仍在生成中，请保持页面开启；超过约 2 分钟将显示超时提示。'},30000)}</script></body></html>")
+            "<section class='card'><h2>AI 生成规则</h2><p class='hint'>粘贴业务规则或上传 TXT / Excel；生成后逐条展开校对，确认后再发布。</p><form id='ai-rule-form' method='post' action='/admin/ai-rule-draft' enctype='multipart/form-data'><label>客户<select name='customer_code'>" + business_customer_options + "</select></label><label>业务规则<textarea name='requirement' placeholder='例如：验收要求包含一院时，计划标记填 YP017-X486。'></textarea></label><label>或上传规则文件<input id='rules_file' name='rules_file' type='file' accept='.txt,text/plain,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsm,application/vnd.ms-excel.sheet.macroenabled.12'><small id='rules_file_name'>尚未选择文件</small></label><button id='ai-rule-button'>生成规则草稿</button><span id='ai-rule-status' class='hint'></span></form></section>" + manual_rules + input_fields_section + erp_fields_section + other_section + "<script>const f=document.querySelector('#ai-rule-form'),file=document.querySelector('#rules_file'),fileName=document.querySelector('#rules_file_name');file.onchange=()=>fileName.textContent=file.files.length?'已选择：'+file.files[0].name:'尚未选择文件';f.onsubmit=()=>{const b=document.querySelector('#ai-rule-button'),s=document.querySelector('#ai-rule-status');b.disabled=true;b.textContent='正在生成…';s.textContent='正在读取规则并调用模型，通常需要 10–60 秒；较长规则包可能更久。';setTimeout(()=>{if(b.disabled)s.textContent='仍在生成中，请保持页面开启；超过约 2 分钟将显示超时提示。'},30000)}</script></body></html>")
         # 默认页面仅展示业务人员日常需要的内容；字段 ID 与完整表结构收进高级设置。
         return HTMLResponse("""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>业务规则管理</title><style>
 *{box-sizing:border-box}body{font:14px/1.4 system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:1180px;margin:0 auto;padding:24px 24px 48px;color:#172033;background:#f6f8fc}h1{font-size:28px;margin:0 0 4px}h2{font-size:18px;margin:0 0 6px}.hint{color:#60708a;margin:0 0 8px}.card,details{border:1px solid #e1e7f0;border-radius:11px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 8px #19355a0a}form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin:9px 0}.inline-form{margin:0;gap:6px;align-items:center;flex-wrap:nowrap}label{display:grid;gap:3px;font-weight:600;color:#36465f}small{font-weight:400;color:#74839a}input,select,textarea,button{font:inherit;padding:7px 8px;border:1px solid #cbd5e1;border-radius:7px;background:#fff}input:focus,select:focus,textarea:focus{outline:2px solid #9cc3ff;border-color:#4f8df7}textarea{min-width:280px;min-height:68px;resize:vertical}button{background:#1769e0;color:#fff;border:0;border-radius:7px;font-weight:650;cursor:pointer;min-height:34px}button:hover{background:#0959c9}table{border-collapse:separate;border-spacing:0;width:100%;margin:8px 0;overflow:hidden;border:1px solid #e1e7f0;border-radius:8px}th,td{padding:7px 8px;border-bottom:1px solid #e8edf5;text-align:left;vertical-align:middle}tr:last-child td{border-bottom:0}th{background:#f3f7ff;color:#42536e}.customer-table input{max-width:265px}.customer-table td{height:48px}.step{display:inline-block;margin-bottom:4px;color:#1769e0;font-weight:750;font-size:12px;letter-spacing:.04em}.editor-row{padding:8px;border:1px solid #e5eaf2;border-radius:8px;background:#fbfcff}.editor-row code{padding:7px;background:#eef4ff;border-radius:5px;color:#275fae}</style></head><body>
 <h1>业务规则管理</h1><p class='hint'>先定义字段，再按客户建立规则。带 * 的内容必须填写。</p>"""+
-"<section class='card'><span class='step'>AI 辅助</span><h2>用自然语言生成规则草稿</h2><p class='hint'>粘贴邮件、会议纪要或 Word 中的规则文字，也可上传 TXT。AI 会按输出字段和条件拆成规则草稿；不会直接发布。</p><form method='post' action='/admin/ai-rule-draft' enctype='multipart/form-data'><label>客户*<select name='customer_code'>"+business_customer_options+"</select></label><label>业务规则<textarea name='requirement' placeholder='例如：规则1：生产标识：JHT；交货日期：当前日期加45天，格式 yyyyMMdd；验收要求含“一院”时，计划标记为 YP017-X486。'></textarea><small>可直接粘贴多条规则。</small></label><label>或上传 TXT<input name='rules_file' type='file' accept='.txt,text/plain'><small>TXT 内容会替代上方粘贴内容。</small></label><button>生成规则草稿</button></form></section>"+
+"<section class='card'><span class='step'>AI 辅助</span><h2>用自然语言生成规则草稿</h2><p class='hint'>粘贴邮件、会议纪要或 Word 中的规则文字，也可上传 TXT 或 Excel。AI 会按输出字段和条件拆成规则草稿；不会直接发布。</p><form method='post' action='/admin/ai-rule-draft' enctype='multipart/form-data'><label>客户*<select name='customer_code'>"+business_customer_options+"</select></label><label>业务规则<textarea name='requirement' placeholder='例如：规则1：生产标识：JHT；交货日期：当前日期加45天，格式 yyyyMMdd；验收要求含“一院”时，计划标记为 YP017-X486。'></textarea><small>可直接粘贴多条规则。</small></label><label>或上传规则文件<input name='rules_file' type='file' accept='.txt,text/plain,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsm,application/vnd.ms-excel.sheet.macroenabled.12'><small>Excel 需包含“录入ERP的字段”和“规则描述”两列；文件内容会替代上方粘贴内容。</small></label><button>生成规则草稿</button></form></section>"+
 "<section class='card'><span class='step'>步骤 1</span><h2>客户</h2><p class='hint'>示例：客户代码填 <code>C004</code>；客户名称填 <code>航天四院</code>。</p><form method='post' action='/admin/customers'><label>客户代码*<input name='code' placeholder='例如 C004' required></label><label>客户名称*<input name='name' placeholder='例如 航天四院' required></label><button>新增客户</button></form>"+customer_table+"</section>"+
 "<section class='card'><span class='step'>步骤 2</span><h2>选择 ERP 字段并建立客户规则组</h2><p>示例：客户选“航天四院”，ERP 字段选“计划标记”。如果通用规则已满足需求，不要建立规则组；仅客户有例外时创建。</p><form method='post' action='/admin/field-rule-groups'><label>客户* <select name='customer_code'>"+customer_options+"</select></label><label>ERP 字段* <select name='erp_field_id'>"+erp_options+"</select></label><button>建立规则组</button></form><details><summary>查看通用规则参考（只读）</summary>"+common_table+"</details></section>"+
 "<section class='card'><span class='step'>步骤 3</span><h2>为客户规则组新增规则</h2><p class='hint'>输出字段由规则组自动确定。每个框都可按下面的示例填写；默认规则优先级为 10，客户特殊覆盖通常为 100，必须覆盖可填 200。</p><form method='post' action='/admin/rules'><label>规则组* <select name='group_id'>"+group_options+"</select><small>示例：C004 / 计划标记 / 顺序 8</small></label><label>规则名称*<input name='name' placeholder='例如 一院验收计划标记' required></label><label>优先级*<input name='priority' type='number' value='10'><small>例如 10</small></label><label>执行方式*<select name='task_type'><option value='direct_atomic'>直接执行（复制/映射/固定值）</option><option value='deterministic'>模型编排原子单元</option><option value='developer_executor'>开发者执行器</option><option value='semantic'>语义理解</option></select><small>固定值可选“直接执行”</small></label><label>执行器名称<select name='executor_name'>"+executor_options+"</select><small>直接执行或开发者执行器时选择；模型编排可不选</small></label><label>触发条件<textarea name='condition'>always true</textarea><small>例如：验收要求 contains '一院'；无条件：always true</small></label><label>动作说明*<textarea name='action' placeholder='例如 验收要求含一院时，计划标记设为 YP017-X486' required></textarea></label><label>依赖输入字段（可多选）<select name='input_field_ids' multiple size='5'>"+input_options+"</select><small>例如：选择“验收要求”</small></label><label>执行器配置（JSON）<textarea name='executor_config'>{}</textarea><small>固定值示例：&#123;&quot;value&quot;:&quot;YP017-X486&quot;&#125;</small></label><label><input name='enabled' type='checkbox' checked> 立即启用</label><button>新增规则</button></form></section>"+

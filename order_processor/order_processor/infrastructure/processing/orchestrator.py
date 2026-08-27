@@ -172,7 +172,13 @@ class LLMOrchestrator:
         """执行语义任务并强制模型返回 JSON。"""
         if self._agno_agent:
             content = self._agno_agent.understand_json(prompt)
-            log_llm_exchange("Agno/DeepSeek-语义任务", self.model, prompt, content)
+            response = content + f"\n[LLM 响应元数据]\n{self._agno_agent.last_response_metadata}"
+            log_llm_exchange("Agno/DeepSeek-语义任务", self.model, prompt, response)
+            if self._agno_agent.last_finish_reason == "length":
+                raise RuntimeError(
+                    "模型输出超过长度上限，规则草稿在 JSON 完成前被截断。"
+                    "请将 DEEPSEEK_MAX_TOKENS 设置为至少 8192 后重试，或将规则表拆分上传"
+                )
             return content
         raise RuntimeError("语义任务需要已配置的 DEEPSEEK_API_KEY 与 agno 依赖")
 

@@ -15,7 +15,7 @@ class CodeExecutor:
     ATOMIC_FUNCTIONS = AtomicUnits.get_function_map()
     
     @classmethod
-    def execute(cls, code: str, row: dict) -> Dict[str, Any]:
+    def execute(cls, code: str, row: dict, runtime_state: dict | None = None) -> Dict[str, Any]:
         """
         执行代码，返回处理后的row
         
@@ -26,6 +26,7 @@ class CodeExecutor:
             "error": 错误信息（如有）
         }
         """
+        persistent_state = runtime_state if runtime_state is not None else {}
         safe_globals = {
             "__builtins__": {
                 "print": print,
@@ -34,11 +35,16 @@ class CodeExecutor:
                 "int": int,
                 "float": float,
                 "list": list,
+                "set": set,
                 "dict": dict,
                 "isinstance": isinstance,
             },
             **cls.ATOMIC_FUNCTIONS,
+            # 兼容规则编译器为跨行编号生成的 ``globals()`` 检查；只暴露
+            # 本批次的私有规则状态，而不是完整的 Python 全局命名空间。
+            "globals": lambda: persistent_state,
             "row": row.copy(),
+            **persistent_state,
         }
         
         try:
@@ -50,6 +56,10 @@ class CodeExecutor:
                 returned = processor(safe_globals["row"])
                 if isinstance(returned, dict):
                     safe_globals["row"] = returned
+            # 仅持久化规则专用变量，避免把输入行或执行器函数带到下一行。
+            persistent_state.update(
+                {key: value for key, value in safe_globals.items() if key.startswith("_rule_")}
+            )
             result_row = safe_globals.get("row", row)
             return {"success": True, "data": result_row, "error": None}
         except Exception as e:
