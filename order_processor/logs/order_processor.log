@@ -10655,3 +10655,97 @@ try:
 except:
     row = set_field(row, "需求日期", "")
 ----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+LLM 调用时间: 2026-08-31 16:39:09
+服务商: Agno/DeepSeek-语义任务
+模型: deepseek-v4-flash
+[LLM 输入]
+你是订单 ERP 规则库生成助手。
+
+任务：
+将业务人员提供的自然语言规则，转换成可由业务人员校对的 ERP 规则库草稿。你只能生成草稿；不得直接发布、不得创建或删除字段、不得杜撰字段名。
+
+重要边界：
+1. 只有“从物料长描述中截取第一个和第二个 | 之间的内容”由数据预处理阶段完成。
+2. 出现该需求时，直接使用预处理后的“型号”输入字段，不要生成截取或正则提取逻辑。
+3. 当前日期计算、日期格式转换、按合同重新编号、条件判断、字段拼接、固定值和映射，均需要生成 ERP 规则草稿。
+4. 固定值、复制、映射、清空、模板拼接优先使用直接执行器；其他复杂逻辑使用 task_type=deterministic，executor_name 为空，并在 review_note 中写明需确认的口径。
+
+字段约束：
+- 只能使用下方提供的输入字段和 ERP 输出字段，字段名称必须完全匹配。
+- 无法匹配的业务描述不得猜测，放入 unmatched_items。
+- 同一个 ERP 输出字段可有多条规则；按业务原文先后给出 priority：10、20、30……
+- always true 代表无条件执行。
+- 条件使用中文可读表达式，例如：验收要求 contains '一院'、产品型号 starts with 'RP'、备注 contains '直接发货'、质量等级 equals 'JHT'。
+- 原文中的 % 表示通配；RP%(A)% 表示“以 RP 开头且包含 (A)”。
+
+字段状态与依赖规则：
+1. 输入字段是原始数据，视为只读。例如“产品型号”只能代表 Excel 原始值。
+2. ERP 输出字段是当前规则执行后的业务状态，可以被后续规则读取、判断和再次加工。
+3. 当业务描述先写“型号 = 产品型号”，后续又写“型号包含 J30J 时加前缀”，后续条件必须写为“型号 contains 'J30J'”，结果也必须在当前“型号”前加前缀；不得再次改用“产品型号”。
+4. 只有在“将原始产品型号写入型号”的初始化规则中，才使用“产品型号”。
+5. 判断为空、非空、是否已有值时，优先判断当前 ERP 输出字段。例如“型号为空时清空物料号”应使用“型号 is empty”，而不是“产品型号 is empty”。
+6. 如果当前输出字段尚未被前序规则赋值，空值判断按空处理；不得自动回退读取同名或相近的输入字段。
+7. 在 action、condition、input_field_ids 中均明确记录这种依赖；需要读取当前 ERP 状态时，将对应 ERP 输出字段加入 input_field_ids。
+
+action（保存为数据库 action_description）的强制要求：
+1. action 不是页面摘要，而是后续“执行代码生成模型”的唯一业务指令，必须写成完整、无歧义、可直接执行的中文说明。
+2. 每条 action 必须明确写出：读取哪个字段的什么状态（原始输入或当前 ERP 输出）、在什么条件下执行、如何计算或拼接、最终写入哪个 ERP 输出字段、空值或未命中时如何处理。
+3. 即使 condition 已单独保存，action 仍要用一句话重复关键条件，以保证 action_description 单独输入模型时也能被正确理解。
+4. 涉及前序规则结果时，必须写“读取当前已生成的【字段】”，不得笼统写字段名。
+5. 禁止使用“复制”“加前缀”“留空”“按规则处理”“同上”等简写；必须说明源字段、目标字段、具体值和未命中行为。
+
+action 正反示例：
+- 错误：型号=(QJB/K)+产品型号。
+- 正确：当当前已生成的 ERP 字段“型号”包含“J30J”时，读取当前“型号”的完整值，在其最前面追加固定前缀“(QJB/K)”，并将拼接结果覆盖写回 ERP 字段“型号”；条件不满足时保持当前“型号”不变，不读取原始输入字段“产品型号”。
+- 错误：物料号留空。
+- 正确：当当前已生成的 ERP 字段“型号”为空字符串或不存在时，将 ERP 字段“物料号”明确写为空字符串；条件不满足时不修改“物料号”。
+
+可用输入字段：
+[{"id": "input_as_order_number", "name": "AS订单号", "type": "text"}, {"id": "input_wbs_number", "name": "wbs号", "type": "text"}, {"id": "input_product_model", "name": "产品型号", "type": "text"}, {"id": "input_code", "name": "代码", "type": "text"}, {"id": "input_unit_price", "name": "单价", "type": "text"}, {"id": "input_document_number", "name": "单据编号", "type": "text"}, {"id": "input_original_order_line", "name": "原始订单序号", "type": "text"}, {"id": "input_sender", "name": "发件人", "type": "text"}, {"id": "input_contract_signer", "name": "合同签订人", "type": "text"}, {"id": "input_contract_number", "name": "合同编号", "type": "text"}, {"id": "input_subtable_note", "name": "子表的备注", "type": "text"}, {"id": "input_customer_code", "name": "客户代码", "type": "text"}, {"id": "input_customer_name", "name": "客户名称", "type": "text"}, {"id": "input_minimum_package_quantity", "name": "客户提供的最小包装数量", "type": "text"}, {"id": "input_virtual_code", "name": "客户明确提供的虚拟编码", "type": "text"}, {"id": "input_project_name", "name": "客户明确提供的项目名称", "type": "text"}, {"id": "input_customer_material_code", "name": "客户物资编码", "type": "text"}, {"id": "input_customer_due_date", "name": "客户需求日期", "type": "text"}, {"id": "input_current_date", "name": "当前日期", "type": "text"}, {"id": "input_command_number", "name": "指令号", "type": "text"}, {"id": "input_po_number", "name": "标准采购订单", "type": "text"}, {"id": "input_material_code", "name": "物料编号", "type": "text"}, {"id": "input_material_description", "name": "物料长描述", "type": "text"}, {"id": "input_user_contract_number", "name": "用户合同号", "type": "text"}, {"id": "input_user_order_line", "name": "用户订单序号", "type": "text"}, {"id": "input_plan_number", "name": "计划号", "type": "text"}, {"id": "input_order_line_number", "name": "订单行号", "type": "text"}, {"id": "input_requisition_number", "name": "请购编号", "type": "text"}, {"id": "input_purchase_quantity", "name": "采购数量", "type": "text"}, {"id": "input_project_number", "name": "项目", "type": "text"}, {"id": "input_acceptance_requirement", "name": "验收要求", "type": "text"}]
+
+可用 ERP 输出字段：
+[{"id": "erp_customer_code", "name": "客户编码"}, {"id": "erp_main_production_mark", "name": "生产标识（主）"}, {"id": "erp_order_number", "name": "订单号"}, {"id": "erp_main_plan_mark", "name": "计划标记（主）"}, {"id": "erp_required_date", "name": "需求日期"}, {"id": "erp_recipient", "name": "收件人"}, {"id": "erp_planning_basis", "name": "下计划依据"}, {"id": "erp_main_note", "name": "主表备注"}, {"id": "erp_line_number", "name": "明细序号"}, {"id": "erp_model", "name": "型号"}, {"id": "erp_material_number", "name": "料号"}, {"id": "erp_customer_model", "name": "客户型号"}, {"id": "erp_sub_production_mark", "name": "生产标识（子）"}, {"id": "erp_sub_plan_mark", "name": "计划标记（子）"}, {"id": "erp_order_quantity", "name": "订货数量"}, {"id": "erp_unit_price", "name": "单价"}, {"id": "erp_unit_price_excluding_tax", "name": "不含税单价"}, {"id": "erp_delivery_date", "name": "交货日期"}, {"id": "erp_minimum_package_quantity", "name": "最小包装数量"}, {"id": "erp_sub_note", "name": "子表备注"}, {"id": "erp_virtual_code", "name": "虚拟编码"}, {"id": "erp_customer_line_number", "name": "客户序号"}, {"id": "erp_material_code", "name": "物资编码"}, {"id": "erp_customer_order_due_date", "name": "客户订单需求日期"}, {"id": "erp_project_name", "name": "项目名称"}]
+
+支持的直接执行器：
+- copy_or_blank：直接复制一个输入字段
+- set_value：固定值
+- map_value：按映射表转换值
+- set_blank：清空字段
+- format_template：按模板拼接字段
+
+业务人员原始规则：
+客户代码：K-24-008
+生产标识（主）：固定为JZ
+订单号：合同编号
+计划标记（主）：BKFXK-24-008ECSX
+需求日期：当前日期+30天
+型号：按产品型号，去掉中文、Q/21E、158厂等内容
+物料号(型号料号二选一必填)：21E开头的填物料号
+生产标识：固定为JZ
+计划标记：BKFXK-24-008ECSX
+订货数量：采购数量
+单价：输入的单价，没有留空
+交货日期(不能为周末)：当前日期加30转换为 yyyyMMdd 格式
+
+示例输入：
+生产标识：JHT；主表备注：AS订单号+验收情况；验收要求包含一院时，计划标记为 YP017-X486。
+
+示例输出：
+{"summary":"生成生产标识、主表备注和计划标记三类规则","rules":[{"erp_field_id":"erp_production_mark","name":"生产标识固定为 JHT","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“生产标识”明确写为固定字符串“JHT”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JHT"},"review_note":""},{"erp_field_id":"erp_main_note","name":"拼接主表备注","condition":"always true","action":"无条件执行：依次读取原始输入字段“AS订单号”和“验收情况”，将两个值直接拼接后写入 ERP 字段“主表备注”；任一输入为空时以空字符串参与拼接。","input_field_ids":["input_as_order_no","input_acceptance_status"],"priority":10,"task_type":"direct_atomic","executor_name":"format_template","executor_config":{"template":"{AS订单号}{验收情况}"},"review_note":"请确认是否需要连接符"},{"erp_field_id":"erp_plan_mark","name":"一院验收计划标记","condition":"验收要求 contains '一院'","action":"当原始输入字段“验收要求”包含“一院”时，将 ERP 字段“计划标记”明确写为固定字符串“YP017-X486”；条件不满足时不修改该字段。","input_field_ids":["input_acceptance_requirement"],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"YP017-X486"},"review_note":""}],"unmatched_items":[]}
+
+字段状态示例输入：
+型号：产品型号；如果型号包含 J30J，则在型号前加（QJB/K）；如果型号为空，则物料号留空。
+
+字段状态示例输出（省略无关字段）：
+{"rules":[{"erp_field_id":"erp_model","name":"型号初始化","condition":"always true","action":"型号复制产品型号","input_field_ids":["input_product_model"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_model","name":"型号包含 J30J 时加前缀","condition":"型号 contains 'J30J'","action":"在当前型号前加（QJB/K）","input_field_ids":["erp_model"],"priority":20,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"判断和拼接均基于当前型号，不读取产品型号"},{"erp_field_id":"erp_material_number","name":"型号为空时物料号留空","condition":"型号 is empty","action":"物料号留空","input_field_ids":["erp_model"],"priority":10,"task_type":"direct_atomic","executor_name":"set_blank","executor_config":{},"review_note":"空值判断基于当前型号"}]}
+
+请只输出合法 JSON，不要输出 Markdown，不要解释。JSON 格式必须为：
+{"summary":"","rules":[{"erp_field_id":"","name":"","condition":"always true","action":"","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"","executor_config":{},"review_note":""}],"unmatched_items":[{"source_text":"","reason":""}]}
+
+[LLM 原始输出]
+{"summary":"生成客户代码、生产标识、订单号、计划标记、需求日期、型号、物料号、订货数量、单价、交货日期等规则","rules":[{"erp_field_id":"erp_customer_code","name":"客户代码固定为K-24-008","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“客户编码”明确写为固定字符串“K-24-008”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"K-24-008"},"review_note":""},{"erp_field_id":"erp_main_production_mark","name":"生产标识（主）固定为JZ","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“生产标识（主）”明确写为固定字符串“JZ”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JZ"},"review_note":""},{"erp_field_id":"erp_order_number","name":"订单号复制合同编号","condition":"always true","action":"无条件执行：读取原始输入字段“合同编号”的完整值，将其直接复制写入 ERP 字段“订单号”；若“合同编号”为空，则“订单号”写为空字符串。","input_field_ids":["input_contract_number"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_main_plan_mark","name":"计划标记（主）固定为BKFXK-24-008ECSX","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“计划标记（主）”明确写为固定字符串“BKFXK-24-008ECSX”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"BKFXK-24-008ECSX"},"review_note":""},{"erp_field_id":"erp_required_date","name":"需求日期为当前日期加30天","condition":"always true","action":"无条件执行：读取原始输入字段“当前日期”，将其加上30天，并将结果以日期格式写入 ERP 字段“需求日期”；若“当前日期”为空或无法解析，则“需求日期”写为空字符串。","input_field_ids":["input_current_date"],"priority":10,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"需确认日期格式和加天数的具体实现"},{"erp_field_id":"erp_model","name":"型号清洗","condition":"always true","action":"无条件执行：读取原始输入字段“产品型号”的完整值，去除其中的中文、字符串“Q/21E”和“158厂”等内容，将清洗后的结果写入 ERP 字段“型号”；若“产品型号”为空，则“型号”写为空字符串。","input_field_ids":["input_product_model"],"priority":10,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"需确认去除规则的具体实现，如是否去除所有中文、是否去除特定子串"},{"erp_field_id":"erp_material_number","name":"21E开头时物料号复制物料编号","condition":"型号 starts with '21E'","action":"当当前已生成的 ERP 字段“型号”以“21E”开头时，读取原始输入字段“物料编号”的完整值，将其直接复制写入 ERP 字段“料号”；条件不满足时不修改“料号”。","input_field_ids":["erp_model","input_material_code"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_sub_production_mark","name":"生产标识（子）固定为JZ","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“生产标识（子）”明确写为固定字符串“JZ”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"JZ"},"review_note":""},{"erp_field_id":"erp_sub_plan_mark","name":"计划标记（子）固定为BKFXK-24-008ECSX","condition":"always true","action":"无条件执行：不读取任何输入字段，将 ERP 字段“计划标记（子）”明确写为固定字符串“BKFXK-24-008ECSX”。","input_field_ids":[],"priority":10,"task_type":"direct_atomic","executor_name":"set_value","executor_config":{"value":"BKFXK-24-008ECSX"},"review_note":""},{"erp_field_id":"erp_order_quantity","name":"订货数量复制采购数量","condition":"always true","action":"无条件执行：读取原始输入字段“采购数量”的完整值，将其直接复制写入 ERP 字段“订货数量”；若“采购数量”为空，则“订货数量”写为空字符串。","input_field_ids":["input_purchase_quantity"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_unit_price","name":"单价复制输入单价","condition":"always true","action":"无条件执行：读取原始输入字段“单价”的完整值，将其直接复制写入 ERP 字段“单价”；若“单价”为空，则“单价”写为空字符串。","input_field_ids":["input_unit_price"],"priority":10,"task_type":"direct_atomic","executor_name":"copy_or_blank","executor_config":{},"review_note":""},{"erp_field_id":"erp_delivery_date","name":"交货日期为当前日期加30天并格式化","condition":"always true","action":"无条件执行：读取原始输入字段“当前日期”，将其加上30天，并将结果转换为 yyyyMMdd 格式后写入 ERP 字段“交货日期”；若“当前日期”为空或无法解析，则“交货日期”写为空字符串。","input_field_ids":["input_current_date"],"priority":10,"task_type":"deterministic","executor_name":"","executor_config":{},"review_note":"需确认日期格式转换和加天数的具体实现，且需确保交货日期不为周末"}],"unmatched_items":[]}
+[LLM 响应元数据]
+{"finish_reason": "stop", "model": "deepseek-v4-flash", "prompt_tokens": 3178, "completion_tokens": 1461, "total_tokens": 4639, "reasoning_tokens": null}
+----------------------------------------------------------------------
