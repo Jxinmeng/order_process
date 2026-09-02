@@ -10,8 +10,8 @@ from order_processor.shared.settings import load_project_env
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="按 SQLite 规则库处理订单 Excel 文件")
-    parser.add_argument("--input", default="input/input_orders.xlsx", help="待处理的 Excel 文件路径")
+    parser = argparse.ArgumentParser(description="按 SQLite 规则库处理订单文件")
+    parser.add_argument("--input", default="input/input_orders.xlsx", help="待处理的 Excel 文件路径（CLI 暂仅支持 Excel）")
     parser.add_argument("--output", default="output/output_orders.xlsx", help="处理结果的 Excel 输出路径")
     parser.add_argument("--log", default="logs/order_processor.log", help="运行日志及 DeepSeek 调用审计日志路径")
     return parser.parse_args()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import logging
 import shutil
 import zipfile
 import hmac
@@ -21,9 +22,13 @@ from order_processor.infrastructure.persistence.rule_repository import RuleRepos
 from order_processor.infrastructure.processing.workflow import OrderWorkflow
 from order_processor.infrastructure.processing.developer_executors import EXECUTORS as DEVELOPER_EXECUTORS
 from order_processor.infrastructure.processing.orchestrator import LLMOrchestrator
+from order_processor.infrastructure.ingestion.source_extractor import SourceIngestionService, SourceTextReader
+from order_processor.infrastructure.excel.excel_reader import ExcelReader
 from order_processor.interfaces.rule_draft_parser import parse_rule_draft
 from order_processor.interfaces.rule_file_reader import read_rule_file
 from order_processor.shared.settings import load_project_env
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def register_web_ui(app: FastAPI, project_root: Path) -> None:
@@ -323,36 +328,121 @@ body{font:16px system-ui;max-width:680px;margin:60px auto;padding:0 24px;color:#
 form{border:1px solid #d7dce5;border-radius:12px;padding:24px;display:grid;gap:16px}
 input,button{font:inherit;padding:10px}button{background:#1769e0;color:#fff;border:0;border-radius:7px;cursor:pointer}
 #result{margin-top:20px;padding:14px;border-radius:7px;background:#f3f7ff;white-space:pre-wrap}.hint{color:#60708a}
-</style></head><body><h1>订单处理器</h1><p class='hint'>上传 Excel，系统按规则处理后生成新的 Excel 文件。</p>
-<form id='form'><label>订单 Excel<input name='file' type='file' accept='.xlsx' required></label>
-<label>输出文件名<input name='output_name' value='处理结果.xlsx' required></label><button>开始处理</button></form>
+</style></head><body><h1>订单处理器</h1><p class='hint'>可先仅抽取并校对 JSON；确认字段无误后，再上传同一 JSON 执行订单规则。</p>
+<form id='form'><label>订单来源（可多选）<input name='files' type='file' multiple accept='.xlsx,.json,.eml,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.docx,.txt,.md' required><span class='hint'>同一次上传视为同一客户的一批材料：PDF/图片走 MinerU，Word/Excel 本地读取，全部合并后调用一次 Qwen。</span></label>
+<label>输出文件名<input name='output_name' value='处理结果.xlsx' required></label><div><button name='mode' value='mineru' type='submit'>1. 原始文件 → MinerU</button> <button name='mode' value='prepared_json' type='submit'>2. MD/Excel/Word → JSON</button> <button name='mode' value='extract' type='submit'>3. 原始文件 → JSON</button> <button name='mode' value='process' type='submit'>JSON → 执行规则</button></div></form>
 <div id='result'>等待上传文件。</div><script>
 const form=document.querySelector('#form'), result=document.querySelector('#result');
-form.onsubmit=async e=>{e.preventDefault();result.textContent='正在处理，请稍候…';const r=await fetch('/ui/process',{method:'POST',body:new FormData(form)});const d=await r.json();
-if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';result.innerHTML=`处理完成：共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>`};
+form.onsubmit=async e=>{e.preventDefault();const mode=e.submitter?.value||'process',fd=new FormData(form);fd.set('mode',mode);result.textContent=mode==='mineru'?'正在调用 MinerU，请稍候…':mode==='extract'||mode==='prepared_json'?'正在生成 JSON，请稍候…':'正在处理，请稍候…';const r=await fetch('/ui/process',{method:'POST',body:fd});const d=await r.json();
+if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return}if(d.mode==='mineru'){result.innerHTML=`MinerU 解析完成：${d.file_count} 个文件。<br><a href="${d.mineru_download_url}">下载 MinerU 原始结果</a>`;return}if(d.mode==='extract'){result.innerHTML=`抽取完成：${d.file_count} 个文件，共 ${d.extracted_count} 行。<br><a href="${d.extraction_download_url}">下载并校对 JSON</a>`;return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';const json=d.extraction_download_url?`<br><a href="${d.extraction_download_url}">下载抽取 JSON</a>`:'';result.innerHTML=`处理完成：${d.file_count} 个文件，共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>${json}`};
 </script></body></html>"""
 
     @app.post("/ui/process", include_in_schema=False)
     def process_upload(
-        file: UploadFile = File(...), output_name: str = Form("处理结果.xlsx"),
+        files: List[UploadFile] = File(...), output_name: str = Form("处理结果.xlsx"), mode: str = Form("process"),
     ) -> dict:
-        if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
-            raise HTTPException(400, "请上传 .xlsx 格式的 Excel 文件")
+        allowed_suffixes = {".xlsx", ".json", ".eml", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".docx", ".txt", ".md"}
+        if not files:
+            raise HTTPException(400, "请至少上传一个文件")
+        suffixes = [Path(item.filename or "").suffix.lower() for item in files]
+        if any(suffix not in allowed_suffixes for suffix in suffixes):
+            raise HTTPException(400, "支持 .xlsx、.json、.eml、.pdf、图片（含 TIFF）、.docx、.txt 和 .md 文件")
+        if mode not in {"mineru", "prepared_json", "extract", "process"}:
+            raise HTTPException(400, "不支持的处理模式")
+        prepared_suffixes = {".md", ".txt", ".docx", ".xlsx", ".json"}
+        if mode == "prepared_json" and any(suffix not in prepared_suffixes for suffix in suffixes):
+            raise HTTPException(400, "MD/Excel/Word → JSON 仅支持 .md、.txt、.docx、.xlsx 和 .json；PDF、图片和邮件请使用原始文件 → JSON")
+        if mode == "process" and any(suffix not in {".json", ".xlsx"} for suffix in suffixes):
+            raise HTTPException(400, "JSON → 执行规则仅支持已校对的 .json；原始 Excel 可直接执行")
         safe_output = Path(output_name).name
         if Path(safe_output).suffix.lower() != ".xlsx":
             safe_output += ".xlsx"
         input_dir.mkdir(exist_ok=True)
         output_dir.mkdir(exist_ok=True)
-        uploaded_path = input_dir / f"upload_{uuid4().hex}_{Path(file.filename).name}"
-        with uploaded_path.open("wb") as target:
-            shutil.copyfileobj(file.file, target)
+        uploaded_paths: list[Path] = []
+        for file in files:
+            uploaded_path = input_dir / f"upload_{uuid4().hex}_{Path(file.filename or 'upload').name}"
+            with uploaded_path.open("wb") as target:
+                shutil.copyfileobj(file.file, target)
+            uploaded_paths.append(uploaded_path)
         output_path = output_dir / safe_output
+
+        def bundle(paths: list[Path], directory: Path, archive_name: str) -> Path:
+            archive_path = directory / archive_name
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for path in paths:
+                    if path.is_file():
+                        archive.write(path, arcname=path.name)
+            return archive_path
+
         # Web 路径不再依赖 AgentOS 的启动顺序；每次处理均显式加载项目 .env。
         load_project_env()
-        result = build_process_orders(os.getenv("DEEPSEEK_API_KEY")).execute(str(uploaded_path), str(output_path))
-        if not result.get("success"):
-            raise HTTPException(500, f"订单处理失败：{result.get('failed_count', 0)} 行未成功")
-        saved_files = [Path(path) for path in result.get("output_files", [])]
+        logger.info("收到订单处理请求：模式=%s，文件数=%d，文件=%s", mode, len(uploaded_paths), [path.name for path in uploaded_paths])
+        if mode == "mineru":
+            mineru_dir = project_root / "data" / "mineru_outputs"
+            mineru_dir.mkdir(parents=True, exist_ok=True)
+            raw_paths: list[Path] = []
+            try:
+                for uploaded_path in uploaded_paths:
+                    raw_path = mineru_dir / f"{uploaded_path.stem}_{uuid4().hex}.md"
+                    reader = SourceTextReader()
+                    if uploaded_path.suffix.lower() == ".xlsx":
+                        raw_text = json.dumps(ExcelReader.read(str(uploaded_path)), ensure_ascii=False, indent=2)
+                    elif uploaded_path.suffix.lower() == ".docx":
+                        raw_text = reader.read_prepared_text(uploaded_path)
+                    else:
+                        raw_text = reader.read(uploaded_path)
+                    raw_path.write_text(raw_text, encoding="utf-8")
+                    raw_paths.append(raw_path)
+            except RuntimeError as error:
+                raise HTTPException(502, str(error)) from error
+            download = raw_paths[0] if len(raw_paths) == 1 else bundle(raw_paths, mineru_dir, f"mineru_{uuid4().hex}.zip")
+            return {"mode": "mineru", "file_count": len(files), "mineru_download_url": f"/ui/mineru-outputs/{download.name}"}
+        process_orders = build_process_orders(os.getenv("DEEPSEEK_API_KEY"))
+        extraction_paths: list[Path] = []
+        extracted_count = 0
+        saved_files: list[Path] = []
+        total = success_count = failed_count = 0
+        try:
+            # 同一次上传的全部材料合并后仅调用一次 Qwen；多张图片/多份附件
+            # 因此可共同补足同一订单，而不是被错误地拆成独立订单。
+            batch_paths = [path for path in uploaded_paths if not (mode == "process" and path.suffix.lower() == ".xlsx")]
+            if batch_paths:
+                logger.info("开始准备合并批次：%d 个文件", len(batch_paths))
+                ingestion = SourceIngestionService(
+                    RuleRepository(project_root / "data" / "rules.db"), project_root / "data" / "extractions",
+                )
+                rows, extraction_json = ingestion.ingest_batch(
+                    batch_paths, prepared=(mode == "prepared_json"),
+                )
+                logger.info("合并批次完成：抽取到 %d 条订单", len(rows))
+                extracted_count += len(rows)
+                extraction_paths.append(Path(extraction_json))
+                if mode not in {"extract", "prepared_json"}:
+                    result = process_orders.execute_rows(rows, str(output_path))
+                    total += result.get("total", 0)
+                    success_count += result.get("success_count", 0)
+                    failed_count += result.get("failed_count", 0)
+                    if not result.get("success"):
+                        raise HTTPException(500, f"订单处理失败：{result.get('failed_count', 0)} 行未成功")
+                    saved_files.extend(Path(path) for path in result.get("output_files", []))
+            for index, uploaded_path in enumerate(uploaded_paths, 1):
+                if mode != "process" or uploaded_path.suffix.lower() != ".xlsx":
+                    continue
+                target_path = output_path if len(uploaded_paths) == 1 else output_dir / f"{Path(safe_output).stem}_{index}_{uploaded_path.stem}.xlsx"
+                result = process_orders.execute(str(uploaded_path), str(target_path))
+                total += result.get("total", 0)
+                success_count += result.get("success_count", 0)
+                failed_count += result.get("failed_count", 0)
+                if not result.get("success"):
+                    raise HTTPException(500, f"订单处理失败：{result.get('failed_count', 0)} 行未成功")
+                saved_files.extend(Path(path) for path in result.get("output_files", []))
+        except RuntimeError as error:
+            raise HTTPException(502, str(error)) from error
+        if mode in {"extract", "prepared_json"}:
+            download = extraction_paths[0] if len(extraction_paths) == 1 else bundle(extraction_paths, project_root / "data" / "extractions", f"extractions_{uuid4().hex}.zip")
+            return {"mode": "extract", "file_count": len(files), "extracted_count": extracted_count,
+                    "extraction_download_url": f"/ui/extractions/{download.name}"}
         if not saved_files:
             raise HTTPException(500, "订单处理完成但未生成输出文件")
 
@@ -361,16 +451,17 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
         if len(saved_files) == 1:
             download_name = saved_files[0].name
         else:
-            archive_name = f"{Path(safe_output).stem}_拆分结果.zip"
-            archive_path = output_dir / archive_name
-            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                for saved_file in saved_files:
-                    if saved_file.is_file():
-                        archive.write(saved_file, arcname=saved_file.name)
-            download_name = archive_name
+            download_name = bundle(saved_files, output_dir, f"{Path(safe_output).stem}_拆分结果.zip").name
+        extraction_download_url = None
+        if extraction_paths:
+            extraction_download = extraction_paths[0] if len(extraction_paths) == 1 else bundle(
+                extraction_paths, project_root / "data" / "extractions", f"extractions_{uuid4().hex}.zip"
+            )
+            extraction_download_url = f"/ui/extractions/{extraction_download.name}"
         return {
-            "total": result["total"], "success_count": result["success_count"],
+            "file_count": len(files), "total": total, "success_count": success_count,
             "output_file_count": len(saved_files),
+            "extraction_download_url": extraction_download_url,
             "download_url": f"/ui/outputs/{download_name}",
         }
 
@@ -380,6 +471,20 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
         if not path.is_file():
             raise HTTPException(404, "输出文件不存在")
         return FileResponse(path, filename=path.name)
+
+    @app.get("/ui/extractions/{filename}", include_in_schema=False)
+    def download_extraction(filename: str) -> FileResponse:
+        path = project_root / "data" / "extractions" / Path(filename).name
+        if not path.is_file():
+            raise HTTPException(404, "抽取 JSON 不存在")
+        return FileResponse(path, filename=path.name, media_type="application/zip" if path.suffix == ".zip" else "application/json")
+
+    @app.get("/ui/mineru-outputs/{filename}", include_in_schema=False)
+    def download_mineru_output(filename: str) -> FileResponse:
+        path = project_root / "data" / "mineru_outputs" / Path(filename).name
+        if not path.is_file():
+            raise HTTPException(404, "MinerU 输出不存在")
+        return FileResponse(path, filename=path.name, media_type="application/zip" if path.suffix == ".zip" else "text/markdown")
 
     # AgentOS 自带根路由在注册时已存在；将用户首页置于路由表首位以覆盖它。
     homepage_route = next(route for route in reversed(app.router.routes) if getattr(route, "path", None) == "/")

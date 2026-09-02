@@ -23,3 +23,6 @@ class OrderProcessorAdapter:
 
     def process(self, input_path: str, output_path: str) -> dict[str, Any]:
         return self._workflow.process(input_path, output_path)
+
+    def process_rows(self, rows: list[dict[str, Any]], output_path: str) -> dict[str, Any]:
+        return self._workflow.process_rows(rows, output_path)

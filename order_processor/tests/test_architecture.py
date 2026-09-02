@@ -23,9 +23,15 @@ class ArchitectureTests(unittest.TestCase):
             if "import agno" in source.read_text(encoding="utf-8") or "from agno" in source.read_text(encoding="utf-8"):
                 agno_importers.append(source.relative_to(root).as_posix())
         self.assertEqual(
-            ["agentos.py"],
+            ["agentos.py", "infrastructure/agno_rule_agent.py", "infrastructure/ingestion/source_extractor.py"],
             agno_importers,
         )
+
+    def test_rule_agent_uses_agno_not_direct_openai_client(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "order_processor" / "infrastructure" / "agno_rule_agent.py").read_text(encoding="utf-8")
+        self.assertIn("from agno.agent import Agent", source)
+        self.assertIn("from agno.models.openai import OpenAIChat", source)
+        self.assertNotIn("from openai import OpenAI", source)
 
 
 if __name__ == "__main__":

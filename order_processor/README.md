@@ -9,6 +9,9 @@
 
 ## AgentOS 服务
 
+项目将 Agno 锁定为 `2.5.0`，因为现有 `data/agentos.db` 的迁移记录来自该版本。不要使用
+未锁版本的 `pip install -U agno`；升级前应先备份数据库并执行官方迁移。
+
 完整 Agno 平台入口为 `order_processor.agentos:app`。它注册两个 Agent（规则编译、订单语义分析）和
 一个 `order-processing` Workflow，并将会话、运行记录与追踪写入 `data/agentos.db`。
 
@@ -70,8 +73,60 @@ python main.py
 `deepseek-v4-flash`。可在 `core/orchestrator.py` 的 `LLMOrchestrator` 初始化参数中
 替换模型。
 
-规则首次命中时，程序会调用模型把该规则编译为可复用代码，并保存到 `rules.compiled_code`。
+规则首次命中时，程序会通过 Agno 调用模型把该规则编译为可复用代码，并保存到 `rules.compiled_code`。
 同一规则的后续订单会直接执行缓存代码，不再调用模型；当规则 `version` 变化时会自动重新编译。
+
+## 多源订单输入（邮件 / PDF / 图片）
+
+用户页面的“订单来源”现在也接受 `.json`、`.eml`、`.pdf`、图片、`.docx`、`.txt` 和 `.md`。
+图片包含 `.png`、`.jpg/.jpeg`、`.webp`、`.tif/.tiff`；多页 TIFF 会先转换为 PDF，再交由 MinerU 解析。
+Excel 仍按原方式直接读取；符合格式的 JSON 会跳过模型、直接校验后进入规则流程；其它格式的流程是：
+
+```
+原文件 -> MinerU 转文本/Markdown -> Qwen 结构化抽取 -> data/extractions/*.json -> 原有规则流程 -> Excel
+```
+
+抽取 JSON 的固定格式为 `{"orders": [{"字段名": "值"}]}`。字段名单并不写死在提示词中，系统会从
+管理后台配置的 `input_fields` 自动取得；模型输出中的其它字段会被丢弃，避免未声明字段进入规则引擎。
+凡是 `input_fields.data_type` 为 `date` 的字段，最终 JSON 会统一校验并输出为 `yyyyMMdd`（例如 `20260902`）。
+
+在项目根目录 `.env` 中配置（模型名可按你在平台实际开通的 Qwen 3.6 部署名修改）：
+
+```dotenv
+QWEN_API_KEY=你的_Qwen_Key
+QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+QWEN_MODEL=qwen3.6
+MINERU_API_URL=https://你的_MinerU_服务/parse
+MINERU_API_KEY=你的_MinerU_Key
+```
+
+`MINERU_API_URL` 需提供 `multipart/form-data` 的 `file` 上传接口，并返回 `markdown`、`text`，或
+`data.markdown` / `data.text` 中任一文本字段。这样 MinerU 的自建、SaaS 或网关实现都能通过配置接入。
+
+若使用 MinerU 官网的轻量文件解析 API，可直接配置：
+
+```dotenv
+MINERU_API_URL=https://mineru.net/api/v1/agent/parse/file
+MINERU_LANGUAGE=ch
+```
+
+系统会自动执行签名上传、任务轮询和 Markdown 下载；轻量接口不需要 `MINERU_API_KEY`，但受文件大小、页数和 IP 限流约束。
+
+若使用 MinerU **标准版 Token**，请改为：
+
+```dotenv
+MINERU_API_URL=https://mineru.net/api/v4
+MINERU_API_KEY=你的MinerU标准版Token
+MINERU_MODEL_VERSION=vlm
+```
+
+系统会自动调用标准版的 `file-urls/batch`、上传签名 URL、轮询批次结果，并读取结果 ZIP 中的 `full.md`。
+
+页面提供可独立验证的四种模式：**1. 原始文件 → MinerU** 用于下载 PDF、图片或 Word 的原始 Markdown/文本，不调用 Qwen；
+**2. MD/Excel/Word → JSON** 跳过 MinerU，只验证字段 JSON 转换；**3. 原始文件 → JSON** 验证 MinerU + Qwen 全链路；
+**JSON → 执行规则** 仅接收已校对的 JSON（或原始 Excel），才会进入现有订单规则链。校对过的 JSON 可再次上传，直接跳过模型后执行规则。
+上传框支持同时选择多份文件；系统按文件边界独立解析和执行规则，批量产生的 Markdown、JSON 或 Excel 会打包为 ZIP 下载。
+对于 `.eml` 邮件，邮件正文与每一个附件会分别经 MinerU/Qwen 处理；抽取 JSON 的 `parts` 数组保留每一部分的来源名称、类型和订单结果，便于校对附件是否被误识别或漏识别。
 
 ## 运行日志
 

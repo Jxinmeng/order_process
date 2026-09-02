@@ -1,0 +1,14 @@
+services:
+  agentos:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      # Web 上传会临时写入 input/，不能只读挂载。
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./logs:/app/logs
+    restart: unless-stopped

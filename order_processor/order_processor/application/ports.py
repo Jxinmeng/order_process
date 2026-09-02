@@ -10,6 +10,8 @@ class OrderProcessingPort(Protocol):
 
     def process(self, input_path: str, output_path: str) -> dict[str, Any]: ...
 
+    def process_rows(self, rows: list[dict[str, Any]], output_path: str) -> dict[str, Any]: ...
+
 
 class RuleCompilerPort(Protocol):
     """将规则转换为受字段白名单约束的可执行代码。"""

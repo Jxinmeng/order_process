@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Runtime-generated files; source samples and rules.db remain versioned.
+data/agentos.db-shm
+data/agentos.db-wal
+data/extractions/
+data/mineru_outputs/
+input/upload_*

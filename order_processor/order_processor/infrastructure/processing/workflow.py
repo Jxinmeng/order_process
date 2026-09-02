@@ -96,16 +96,18 @@ class OrderWorkflow:
         """
         处理整个Excel
         """
+        rows = self.reader.read(input_path)
+        return self.process_rows(rows, output_path, input_label=input_path)
+
+    def process_rows(self, rows: List[dict], output_path: str, input_label: str = "JSON") -> Dict[str, Any]:
+        """处理已标准化的行数据；Excel 与多源抽取共用同一规则及输出逻辑。"""
         print("\n" + "=" * 70)
         print("订单处理工作流 (规则驱动 + LLM编排)")
-        print(f"  输入: {input_path}")
+        print(f"  输入: {input_label}")
         print(f"  输出: {output_path}")
         print("=" * 70)
-        
         # 同一工作流实例可以处理多个文件；跨行规则状态不能泄漏到下一文件。
         self.task_router.reset_runtime_state()
-        # 1. 读取
-        rows = self.reader.read(input_path)
         self._apply_preprocessing(rows)
         print(f"读取 {len(rows)} 行")
         print("-" * 70)

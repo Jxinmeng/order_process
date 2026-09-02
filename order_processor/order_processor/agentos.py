@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,9 @@ def _model() -> OpenAIChat | None:
         id=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
         api_key=api_key,
         base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        timeout=float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "300")),
+        http_client=httpx.Client(timeout=float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "300")), trust_env=False),
+        role_map={"system": "system", "user": "user", "assistant": "assistant", "tool": "tool", "model": "assistant"},
     )
 
 

@@ -18,16 +18,21 @@ class LLMOrchestrator:
     输出：组合后的Python代码
     """
     
-    BASE_URL = "https://api.deepseek.com"
+    DEFAULT_BASE_URL = "https://api.deepseek.com"
+    DEFAULT_MODEL = "deepseek-v4-flash"
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-v4-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None,
+                 base_url: Optional[str] = None):
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        self.model = model
+        # 变量名保留 DEEPSEEK_* 以兼容既有配置；其值可指向官网或百炼等
+        # OpenAI 兼容服务。此前这里硬编码官网地址，导致 .env 的切换不生效。
+        self.model = model or os.getenv("DEEPSEEK_MODEL", self.DEFAULT_MODEL)
+        self.base_url = base_url or os.getenv("DEEPSEEK_BASE_URL", self.DEFAULT_BASE_URL)
         self._agno_agent = None
         if self.api_key:
             # Agno 是唯一的模型调用编排层；导入失败时延迟报出可操作错误，
             # 无 Key 的本地确定性模式不受新增依赖影响。
-            self._agno_agent = AgnoRuleAgent(self.api_key, self.model, self.BASE_URL)
+            self._agno_agent = AgnoRuleAgent(self.api_key, self.model, self.base_url)
         
         # 从文件加载提示词模板
         self._load_prompts()

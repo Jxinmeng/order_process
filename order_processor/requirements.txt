@@ -1,5 +1,7 @@
 openpyxl>=3.0.0
 openai>=1.0.0
 pyyaml>=6.0
-agno[os]>=2.9.0
+# agentos.db 的既有迁移记录来自 Agno 2.5.0；必须锁定，避免 pip 自动升级导致表结构不兼容。
+agno[os]==2.5.0
 uvicorn[standard]>=0.30.0
+Pillow>=10.0.0

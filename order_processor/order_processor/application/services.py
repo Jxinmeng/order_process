@@ -16,3 +16,7 @@ class ProcessOrders:
 
     def execute(self, input_path: str, output_path: str) -> dict[str, Any]:
         return self.processor.process(input_path, output_path)
+
+    def execute_rows(self, rows: list[dict[str, Any]], output_path: str) -> dict[str, Any]:
+        """供非 Excel 输入适配器复用既有订单规则流程。"""
+        return self.processor.process_rows(rows, output_path)

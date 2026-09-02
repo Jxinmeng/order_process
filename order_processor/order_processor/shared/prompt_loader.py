@@ -44,22 +44,8 @@ class PromptLoader:
     def load_rule_library_draft_prompt(cls) -> str:
         """加载自然语言规则库草稿生成提示词。"""
         return cls.load("rule_library_draft_prompt.txt")
-    
+
     @classmethod
-    def get_prompt_files(cls) -> list:
-        """获取所有提示词文件列表"""
-        prompt_dir = cls.PROJECT_ROOT / "infrastructure" / "prompts"
-        return [f.name for f in prompt_dir.glob("*.txt")]
-
-
-# 使用示例
-if __name__ == "__main__":
-    # 加载原子函数说明书
-    doc = PromptLoader.load_atomic_units_doc()
-    print("原子函数说明书:")
-    print(doc[:200] + "...")
-    
-    # 列出所有提示词文件
-    print("\n可用的提示词文件:")
-    for f in PromptLoader.get_prompt_files():
-        print(f"  - {f}")
+    def load_order_batch_extraction_prompt(cls) -> str:
+        """加载合并批次的统一订单抽取提示词。"""
+        return cls.load("order_batch_extraction_prompt.txt")
