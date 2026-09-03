@@ -15,3 +15,13 @@ class SourceExtractorTests(unittest.TestCase):
     def test_rejects_empty_orders(self):
         with self.assertRaises(RuntimeError):
             StructuredOrderExtractor._validate('{"orders": []}', {"型号"})
+
+    def test_generates_original_order_sequence_only_when_source_has_none(self):
+        rows = [{"合同编号": "A"}, {"合同编号": "A"}, {"合同编号": "A"}]
+        StructuredOrderExtractor._assign_missing_original_order_numbers(rows)
+        self.assertEqual(["1", "2", "3"], [row["原始订单序号"] for row in rows])
+
+        source_rows = [{"合同编号": "B", "原始订单序号": "10"}, {"合同编号": "B"}]
+        StructuredOrderExtractor._assign_missing_original_order_numbers(source_rows)
+        self.assertEqual("10", source_rows[0]["原始订单序号"])
+        self.assertNotIn("原始订单序号", source_rows[1])

@@ -33,6 +33,10 @@ logger = logging.getLogger("uvicorn.error")
 
 def register_web_ui(app: FastAPI, project_root: Path) -> None:
     input_dir, output_dir = project_root / "input", project_root / "output"
+    test_data_dir = project_root / "data" / "test"
+    test_input_dir = test_data_dir / "input"
+    test_mineru_dir = test_data_dir / "mineru_outputs"
+    test_extraction_dir = test_data_dir / "extractions"
     admin_sessions: set[str] = set()
     rule_draft_packages: dict[str, tuple[str, list[dict]]] = {}
     rule_file_imports: dict[str, tuple[str, str, str]] = {}
@@ -330,16 +334,16 @@ input,button{font:inherit;padding:10px}button{background:#1769e0;color:#fff;bord
 #result{margin-top:20px;padding:14px;border-radius:7px;background:#f3f7ff;white-space:pre-wrap}.hint{color:#60708a}
 </style></head><body><h1>订单处理器</h1><p class='hint'>可先仅抽取并校对 JSON；确认字段无误后，再上传同一 JSON 执行订单规则。</p>
 <form id='form'><label>订单来源（可多选）<input name='files' type='file' multiple accept='.xlsx,.json,.eml,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.docx,.txt,.md' required><span class='hint'>同一次上传视为同一客户的一批材料：PDF/图片走 MinerU，Word/Excel 本地读取，全部合并后调用一次 Qwen。</span></label>
-<label>输出文件名<input name='output_name' value='处理结果.xlsx' required></label><div><button name='mode' value='mineru' type='submit'>1. 原始文件 → MinerU</button> <button name='mode' value='prepared_json' type='submit'>2. MD/Excel/Word → JSON</button> <button name='mode' value='extract' type='submit'>3. 原始文件 → JSON</button> <button name='mode' value='process' type='submit'>JSON → 执行规则</button></div></form>
+<label>批次名称（仅前 3 步）<input name='batch_name' placeholder='例如 K-17-206'><span class='hint'>原始文件、MinerU 中间结果、JSON 均使用此名称。单文件为同名不同扩展名；多文件在原始文件名后自动加 _1、_2。</span></label><label>规则处理输出文件名（仅第 4 步）<input name='output_name' value='处理结果.xlsx'></label><div><button name='mode' value='mineru' type='submit'>1. 原始文件 → MinerU</button> <button name='mode' value='prepared_json' type='submit'>2. MD/Excel/Word → JSON</button> <button name='mode' value='extract' type='submit'>3. 原始文件 → JSON</button> <button name='mode' value='process' type='submit'>JSON → 执行规则</button></div></form>
 <div id='result'>等待上传文件。</div><script>
 const form=document.querySelector('#form'), result=document.querySelector('#result');
 form.onsubmit=async e=>{e.preventDefault();const mode=e.submitter?.value||'process',fd=new FormData(form);fd.set('mode',mode);result.textContent=mode==='mineru'?'正在调用 MinerU，请稍候…':mode==='extract'||mode==='prepared_json'?'正在生成 JSON，请稍候…':'正在处理，请稍候…';const r=await fetch('/ui/process',{method:'POST',body:fd});const d=await r.json();
-if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return}if(d.mode==='mineru'){result.innerHTML=`MinerU 解析完成：${d.file_count} 个文件。<br><a href="${d.mineru_download_url}">下载 MinerU 原始结果</a>`;return}if(d.mode==='extract'){result.innerHTML=`抽取完成：${d.file_count} 个文件，共 ${d.extracted_count} 行。<br><a href="${d.extraction_download_url}">下载并校对 JSON</a>`;return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';const json=d.extraction_download_url?`<br><a href="${d.extraction_download_url}">下载抽取 JSON</a>`:'';result.innerHTML=`处理完成：${d.file_count} 个文件，共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>${json}`};
+if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return}if(d.mode==='mineru'){result.innerHTML=`MinerU 解析完成：${d.file_count} 个文件。<br><a href="${d.mineru_download_url}">下载 MinerU 原始结果</a>`;return}if(d.mode==='extract'){const mineru=d.mineru_download_url?`<br><a href="${d.mineru_download_url}">下载 MinerU 中间结果</a>`:'';result.innerHTML=`抽取完成：${d.file_count} 个文件，共 ${d.extracted_count} 行。<br><a href="${d.extraction_download_url}">下载并校对 JSON</a>${mineru}`;return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';const json=d.extraction_download_url?`<br><a href="${d.extraction_download_url}">下载抽取 JSON</a>`:'';result.innerHTML=`处理完成：${d.file_count} 个文件，共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>${json}`};
 </script></body></html>"""
 
     @app.post("/ui/process", include_in_schema=False)
     def process_upload(
-        files: List[UploadFile] = File(...), output_name: str = Form("处理结果.xlsx"), mode: str = Form("process"),
+        files: List[UploadFile] = File(...), batch_name: str = Form(""), output_name: str = Form("处理结果.xlsx"), mode: str = Form("process"),
     ) -> dict:
         allowed_suffixes = {".xlsx", ".json", ".eml", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".docx", ".txt", ".md"}
         if not files:
@@ -354,14 +358,32 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
             raise HTTPException(400, "MD/Excel/Word → JSON 仅支持 .md、.txt、.docx、.xlsx 和 .json；PDF、图片和邮件请使用原始文件 → JSON")
         if mode == "process" and any(suffix not in {".json", ".xlsx"} for suffix in suffixes):
             raise HTTPException(400, "JSON → 执行规则仅支持已校对的 .json；原始 Excel 可直接执行")
-        safe_output = Path(output_name).name
-        if Path(safe_output).suffix.lower() != ".xlsx":
-            safe_output += ".xlsx"
-        input_dir.mkdir(exist_ok=True)
+        requested_batch_name = batch_name.strip()
+        if mode == "process":
+            safe_output = Path(output_name).name
+            if Path(safe_output).suffix.lower() != ".xlsx":
+                safe_output += ".xlsx"
+            safe_batch_name = Path(safe_output).stem
+            upload_dir = input_dir
+            upload_dir.mkdir(exist_ok=True)
+        else:
+            safe_batch_name = Path(requested_batch_name).stem
+            if not safe_batch_name or safe_batch_name in {".", ".."} or Path(requested_batch_name).name != requested_batch_name:
+                raise HTTPException(400, "前置数据处理必须填写批次名称，且不能包含文件夹路径")
+            safe_output = f"{safe_batch_name}.xlsx"
+            upload_dir = test_input_dir
+            upload_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(exist_ok=True)
         uploaded_paths: list[Path] = []
-        for file in files:
-            uploaded_path = input_dir / f"upload_{uuid4().hex}_{Path(file.filename or 'upload').name}"
+        for index, file in enumerate(files, 1):
+            suffix = Path(file.filename or "").suffix.lower()
+            if mode == "process":
+                uploaded_path = upload_dir / f"upload_{uuid4().hex}_{Path(file.filename or 'upload').name}"
+            else:
+                uploaded_name = f"{safe_batch_name}{suffix}" if len(files) == 1 else f"{safe_batch_name}_{index}{suffix}"
+                uploaded_path = upload_dir / uploaded_name
+                if uploaded_path.exists():
+                    raise HTTPException(409, f"测试输入文件已存在：{uploaded_path.name}；请更换批次名称或先处理已有文件")
             with uploaded_path.open("wb") as target:
                 shutil.copyfileobj(file.file, target)
             uploaded_paths.append(uploaded_path)
@@ -379,12 +401,14 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
         load_project_env()
         logger.info("收到订单处理请求：模式=%s，文件数=%d，文件=%s", mode, len(uploaded_paths), [path.name for path in uploaded_paths])
         if mode == "mineru":
-            mineru_dir = project_root / "data" / "mineru_outputs"
+            mineru_dir = test_mineru_dir
             mineru_dir.mkdir(parents=True, exist_ok=True)
             raw_paths: list[Path] = []
             try:
                 for uploaded_path in uploaded_paths:
-                    raw_path = mineru_dir / f"{uploaded_path.stem}_{uuid4().hex}.md"
+                    raw_path = mineru_dir / f"{uploaded_path.stem}.md"
+                    if raw_path.exists():
+                        raise HTTPException(409, f"MinerU 输出已存在：{raw_path.name}；请更换批次名称或先处理已有文件")
                     reader = SourceTextReader()
                     if uploaded_path.suffix.lower() == ".xlsx":
                         raw_text = json.dumps(ExcelReader.read(str(uploaded_path)), ensure_ascii=False, indent=2)
@@ -396,7 +420,7 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
                     raw_paths.append(raw_path)
             except RuntimeError as error:
                 raise HTTPException(502, str(error)) from error
-            download = raw_paths[0] if len(raw_paths) == 1 else bundle(raw_paths, mineru_dir, f"mineru_{uuid4().hex}.zip")
+            download = raw_paths[0] if len(raw_paths) == 1 else bundle(raw_paths, mineru_dir, f"{safe_batch_name}_mineru.zip")
             return {"mode": "mineru", "file_count": len(files), "mineru_download_url": f"/ui/mineru-outputs/{download.name}"}
         process_orders = build_process_orders(os.getenv("DEEPSEEK_API_KEY"))
         extraction_paths: list[Path] = []
@@ -410,10 +434,19 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
             if batch_paths:
                 logger.info("开始准备合并批次：%d 个文件", len(batch_paths))
                 ingestion = SourceIngestionService(
-                    RuleRepository(project_root / "data" / "rules.db"), project_root / "data" / "extractions",
+                    RuleRepository(project_root / "data" / "rules.db"), test_extraction_dir,
                 )
+                intermediate_path = test_mineru_dir / f"{safe_batch_name}.md" if mode == "extract" else None
+                if intermediate_path is not None and intermediate_path.exists():
+                    raise HTTPException(409, f"MinerU 中间结果已存在：{intermediate_path.name}；请更换批次名称或先处理已有文件")
+                if mode in {"extract", "prepared_json"}:
+                    json_path = test_extraction_dir / f"{safe_batch_name}.json"
+                    if json_path.exists():
+                        raise HTTPException(409, f"JSON 输出已存在：{json_path.name}；请更换批次名称或先处理已有文件")
                 rows, extraction_json = ingestion.ingest_batch(
                     batch_paths, prepared=(mode == "prepared_json"),
+                    archive_stem=safe_batch_name if mode in {"extract", "prepared_json"} else None,
+                    intermediate_markdown_path=intermediate_path,
                 )
                 logger.info("合并批次完成：抽取到 %d 条订单", len(rows))
                 extracted_count += len(rows)
@@ -440,9 +473,10 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
         except RuntimeError as error:
             raise HTTPException(502, str(error)) from error
         if mode in {"extract", "prepared_json"}:
-            download = extraction_paths[0] if len(extraction_paths) == 1 else bundle(extraction_paths, project_root / "data" / "extractions", f"extractions_{uuid4().hex}.zip")
+            download = extraction_paths[0] if len(extraction_paths) == 1 else bundle(extraction_paths, test_extraction_dir, f"{safe_batch_name}_extractions.zip")
             return {"mode": "extract", "file_count": len(files), "extracted_count": extracted_count,
-                    "extraction_download_url": f"/ui/extractions/{download.name}"}
+                    "extraction_download_url": f"/ui/extractions/{download.name}",
+                    "mineru_download_url": f"/ui/mineru-outputs/{safe_batch_name}.md" if mode == "extract" else None}
         if not saved_files:
             raise HTTPException(500, "订单处理完成但未生成输出文件")
 
@@ -455,7 +489,7 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
         extraction_download_url = None
         if extraction_paths:
             extraction_download = extraction_paths[0] if len(extraction_paths) == 1 else bundle(
-                extraction_paths, project_root / "data" / "extractions", f"extractions_{uuid4().hex}.zip"
+                extraction_paths, test_extraction_dir, f"{safe_batch_name}_extractions.zip"
             )
             extraction_download_url = f"/ui/extractions/{extraction_download.name}"
         return {
@@ -474,14 +508,14 @@ if(!r.ok){result.textContent='处理失败：'+(d.detail||'未知错误');return
 
     @app.get("/ui/extractions/{filename}", include_in_schema=False)
     def download_extraction(filename: str) -> FileResponse:
-        path = project_root / "data" / "extractions" / Path(filename).name
+        path = test_extraction_dir / Path(filename).name
         if not path.is_file():
             raise HTTPException(404, "抽取 JSON 不存在")
         return FileResponse(path, filename=path.name, media_type="application/zip" if path.suffix == ".zip" else "application/json")
 
     @app.get("/ui/mineru-outputs/{filename}", include_in_schema=False)
     def download_mineru_output(filename: str) -> FileResponse:
-        path = project_root / "data" / "mineru_outputs" / Path(filename).name
+        path = test_mineru_dir / Path(filename).name
         if not path.is_file():
             raise HTTPException(404, "MinerU 输出不存在")
         return FileResponse(path, filename=path.name, media_type="application/zip" if path.suffix == ".zip" else "text/markdown")

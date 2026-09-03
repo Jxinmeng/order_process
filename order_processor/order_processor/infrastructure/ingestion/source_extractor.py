@@ -301,7 +301,7 @@ class SourceTextReader:
         message = BytesParser(policy=policy.default).parsebytes(source.read_bytes())
         body = [
             f"发件人: {message.get('From', '')}", f"收件人: {message.get('To', '')}",
-            f"主题: {message.get('Subject', '')}",
+            f"主题: {message.get('Subject', '')}", f"邮件时间: {message.get('Date', '')}",
         ]
         for part in message.walk():
             if part.get_content_type() == "text/plain" and not part.get_content_disposition():
@@ -330,30 +330,60 @@ class SourceTextReader:
 class StructuredOrderExtractor:
     """Qwen 结构化抽取：模型只能输出当前 input_fields 中声明的中文字段名。"""
 
-    _MAX_INPUT_CHARS = 60000
-
     def __init__(self, repository: RuleRepository, client: Any | None = None) -> None:
         self.repository = repository
         self.client = client
         self._cached_agent: Agent | None = None
         self._cached_max_tokens: int = 0
+        self.last_call_metrics: dict[str, Any] = {"called": False}
         self.order_batch_prompt_template = PromptLoader.load_order_batch_extraction_prompt()
 
     def extract(self, source_text: str) -> list[dict[str, Any]]:
         fields = self._fields()
         if not fields:
             raise RuntimeError("输入字段目录为空；请先在管理后台配置 input_fields")
+        # 客户代码必须由规则库按客户名称补全，不能让模型把原单的公司代码误认为客户代码。
+        extraction_fields = [field for field in fields if field["name"] != "客户代码"]
         prompt = (
             self._order_batch_prompt("仅输出合法 JSON，格式为 {\"orders\":[{字段名:值}]}。") + "\n"
-            + f"允许字段（不得新增字段）：{json.dumps(fields, ensure_ascii=False)}\n"
+            + f"允许字段（不得新增字段）：{json.dumps(extraction_fields, ensure_ascii=False)}\n"
             + "不得输出 Markdown 或解释。\n原文：\n" + source_text
         )
         content = self._qwen_completion(prompt, "订单字段抽取")
-        return self._validate(content, {item["name"] for item in fields}, self._field_types())
+        orders = self._validate(content, {item["name"] for item in extraction_fields}, self._field_types())
+        return self._assign_missing_original_order_numbers(self._assign_customer_codes(orders))
 
     def validate_payload(self, payload: Any) -> list[dict[str, Any]]:
         """直接上传的标准 JSON 不再调用模型，但仍执行字段白名单校验。"""
-        return self._validate(json.dumps(payload, ensure_ascii=False), {item["name"] for item in self._fields()}, self._field_types())
+        fields = [field for field in self._fields() if field["name"] != "客户代码"]
+        orders = self._validate(json.dumps(payload, ensure_ascii=False), {item["name"] for item in fields}, self._field_types())
+        return self._assign_missing_original_order_numbers(self._assign_customer_codes(orders))
+
+    def _assign_customer_codes(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """仅以抽取出的客户名称查询 rules.db，补全客户代码。"""
+        for order in orders:
+            customer_name = str(order.get("客户名称") or "").strip()
+            customer_code = self.repository.find_customer_code_by_name(customer_name)
+            if customer_code:
+                order["客户代码"] = customer_code
+            elif customer_name:
+                logger.warning("客户名称未在 rules.db 中唯一匹配，未填客户代码：%s", customer_name)
+        return orders
+
+    @staticmethod
+    def _assign_missing_original_order_numbers(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """原文未提供明细序号时，按同一订单的输出顺序补齐 1、2、3……。"""
+        groups: dict[str, list[dict[str, Any]]] = {}
+        group_fields = ("合同编号", "单据编号", "标准采购订单", "用户合同号")
+        for row in orders:
+            group_key = next((str(row.get(field)).strip() for field in group_fields if str(row.get(field) or "").strip()), "__batch__")
+            groups.setdefault(group_key, []).append(row)
+        for rows in groups.values():
+            if any(str(row.get("原始订单序号") or "").strip() for row in rows):
+                continue
+            for index, row in enumerate(rows, 1):
+                row["原始订单序号"] = str(index)
+        return orders
 
     def _order_batch_prompt(self, output_contract: str) -> str:
         return self.order_batch_prompt_template.format(output_contract=output_contract)
@@ -369,11 +399,6 @@ class StructuredOrderExtractor:
             timeout_seconds = float(os.getenv("QWEN_TIMEOUT_SECONDS", "300"))
         except ValueError as error:
             raise RuntimeError("QWEN_TIMEOUT_SECONDS 必须是秒数，例如 120") from error
-        if len(prompt) > self._MAX_INPUT_CHARS:
-            raise RuntimeError(
-                f"输入文本过长（{len(prompt)} 字符 > {self._MAX_INPUT_CHARS}），"
-                f"模型可能无法在上下文窗口内处理。请减少上传文件数量或拆分批次后重试。"
-            )
         logger.info("Qwen 请求已发出：阶段=%s，模型=%s，输入字符数=%d，最大输出=%d，超时=%ds", stage, model, len(prompt), max_tokens, int(timeout_seconds))
         import concurrent.futures
         try:
@@ -381,19 +406,42 @@ class StructuredOrderExtractor:
         except Exception as error:
             logger.exception("Qwen Agent 创建失败：阶段=%s，错误类型=%s", stage, type(error).__name__)
             raise RuntimeError(f"Qwen Agent 创建失败（{type(error).__name__}）：{error}") from error
+        call_started_at = time.perf_counter()
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(agent.run, prompt)
                 response = future.result(timeout=timeout_seconds + 30)
         except concurrent.futures.TimeoutError:
-            logger.error("Qwen 请求超时：阶段=%s，超时阈值=%ds，输入字符数=%d", stage, int(timeout_seconds) + 30, len(prompt))
+            elapsed_seconds = time.perf_counter() - call_started_at
+            logger.error("Qwen 请求超时：阶段=%s，耗时=%.2fs，超时阈值=%ds，输入字符数=%d", stage, elapsed_seconds, int(timeout_seconds) + 30, len(prompt))
             raise RuntimeError(
                 f"Qwen 请求超时（{int(timeout_seconds) + 30}秒无响应）：阶段={stage}。"
                 f"输入文本有 {len(prompt)} 字符，可能超出模型处理能力；请减少上传文件数量或拆分批次。"
             )
         except Exception as error:
-            logger.exception("Qwen 请求失败：阶段=%s，错误类型=%s", stage, type(error).__name__)
+            elapsed_seconds = time.perf_counter() - call_started_at
+            logger.exception("Qwen 请求失败：阶段=%s，耗时=%.2fs，错误类型=%s", stage, elapsed_seconds, type(error).__name__)
             raise RuntimeError(f"Qwen 请求失败（{type(error).__name__}）：{error}") from error
+        elapsed_seconds = time.perf_counter() - call_started_at
+        metrics = getattr(response, "metrics", None)
+        input_tokens = getattr(metrics, "input_tokens", None) if metrics is not None else None
+        output_tokens = getattr(metrics, "output_tokens", None) if metrics is not None else None
+        total_tokens = getattr(metrics, "total_tokens", None) if metrics is not None else None
+        usage_returned = any(value not in (None, 0) for value in (input_tokens, output_tokens, total_tokens))
+        self.last_call_metrics = {
+            "called": True,
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "input_tokens": input_tokens if usage_returned else None,
+            "output_tokens": output_tokens if usage_returned else None,
+            "total_tokens": total_tokens if usage_returned else None,
+        }
+        logger.info(
+            "Qwen 调用完成：阶段=%s，耗时=%.2fs，输入Token=%s，输出Token=%s，总Token=%s",
+            stage, elapsed_seconds,
+            input_tokens if usage_returned else "未返回",
+            output_tokens if usage_returned else "未返回",
+            total_tokens if usage_returned else "未返回",
+        )
         content = str(response.content or "").strip()
         if not content:
             raise RuntimeError(f"Qwen 请求未返回内容：阶段={stage}；请检查上方 Agno/模型提供方错误日志")
@@ -501,7 +549,14 @@ class SourceIngestionService:
         self.extractor = StructuredOrderExtractor(repository)
         self.archive_dir = Path(archive_dir)
 
-    def ingest_batch(self, source_paths: list[str | Path], *, prepared: bool = False) -> tuple[list[dict[str, Any]], str]:
+    def ingest_batch(
+        self,
+        source_paths: list[str | Path],
+        *,
+        prepared: bool = False,
+        archive_stem: str | None = None,
+        intermediate_markdown_path: str | Path | None = None,
+    ) -> tuple[list[dict[str, Any]], str]:
         """一次上传的一组文件只调用一次 Qwen，可跨页、跨附件组成同一订单。"""
         sources = [Path(path) for path in source_paths]
         if not sources:
@@ -537,6 +592,11 @@ class SourceIngestionService:
             f"===== 来源开始：{item['source_name']}（{item['source_type']}）=====\n{item['text']}\n===== 来源结束 ====="
             for item in segments
         )
+        if intermediate_markdown_path is not None:
+            intermediate = Path(intermediate_markdown_path)
+            intermediate.parent.mkdir(parents=True, exist_ok=True)
+            intermediate.write_text(batch_text, encoding="utf-8")
+            logger.info("已保存批次中间文本：%s", intermediate)
         logger.info("批次文本已准备完成：%d 个来源片段；开始调用 Qwen", len(segments))
         extracted_orders = self.extractor.extract(batch_text) if batch_text else []
         logger.info("Qwen 抽取完成：得到 %d 条订单", len(extracted_orders))
@@ -545,7 +605,8 @@ class SourceIngestionService:
             raise RuntimeError("批次中未得到可用订单；请检查文件内容或 JSON")
         self.archive_dir.mkdir(parents=True, exist_ok=True)
         prefix = "prepared_batch" if prepared else "batch"
-        archive = self.archive_dir / f"{prefix}_{uuid.uuid4().hex}.json"
+        safe_stem = Path(archive_stem or f"{prefix}_{uuid.uuid4().hex}").stem
+        archive = self.archive_dir / f"{safe_stem}.json"
         archive.write_text(json.dumps({
             "source_files": [source.name for source in sources],
             "source_stage": "prepared" if prepared else "raw",

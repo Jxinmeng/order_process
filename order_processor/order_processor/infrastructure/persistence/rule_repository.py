@@ -23,6 +23,7 @@ class RuleRepository:
             if self._table_exists(conn, "rule_groups"):
                 self._migrate_legacy_rule_groups(conn)
             self._create_schema(conn)
+            self._ensure_required_input_fields(conn)
             self._ensure_erp_field_ownership_column(conn)
             self._repair_legacy_rule_field_lists(conn)
             self._create_view(conn)
@@ -99,6 +100,48 @@ class RuleRepository:
     def update_customer(self, code: str, name: str, enabled: bool) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE customers SET customer_name=?,enabled=? WHERE customer_code=?", (name, int(enabled), code))
+
+    def find_customer_code_by_name(self, customer_name: str) -> str | None:
+        """按客户名称确定性补全客户代码；无法唯一判断时返回空。"""
+        query = self._normalize_customer_name(customer_name)
+        if not query:
+            return None
+        with self._connect() as conn:
+            candidates = [
+                (str(row[0]), str(row[1]), self._normalize_customer_name(row[1]))
+                for row in conn.execute(
+                    "SELECT customer_code,customer_name FROM customers "
+                    "WHERE enabled=1 AND customer_code<>'COMMON'"
+                )
+            ]
+
+        return self._match_customer_code(query, candidates)
+
+    @staticmethod
+    def _match_customer_code(
+        query: str,
+        candidates: list[tuple[str, str, str]],
+    ) -> str | None:
+        exact = [code for code, _, name in candidates if name == query]
+        if len(exact) == 1:
+            return exact[0]
+
+        contained = [code for code, _, name in candidates if name and (name in query or query in name)]
+        if len(contained) == 1:
+            return contained[0]
+
+        # 兼容“中电科技（南京）”与“中电科技(南京)电子信息发展有限公司”等
+        # 合同全称差异；分数不足或有两个候选接近时宁可不填，交由人工维护客户表。
+        from difflib import SequenceMatcher
+        ranked = sorted(
+            ((SequenceMatcher(None, query, name).ratio(), code) for code, _, name in candidates if name),
+            reverse=True,
+        )
+        if not ranked or ranked[0][0] < 0.88:
+            return None
+        if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.08:
+            return None
+        return ranked[0][1]
 
     def field_catalog(self) -> dict[str, list[tuple]]:
         with self._connect() as conn:
@@ -253,6 +296,16 @@ class RuleRepository:
         """)
 
     @staticmethod
+    def _ensure_required_input_fields(conn: sqlite3.Connection) -> None:
+        """为多源抽取补齐被既有 ERP 执行器依赖的基础输入字段。"""
+        conn.executemany(
+            "INSERT OR IGNORE INTO input_fields(field_id,display_name,data_type,enabled) VALUES(?,?,?,1)",
+            [
+                ("input_order_note", "订单备注", "text"),
+            ],
+        )
+
+    @staticmethod
     def _ensure_erp_field_ownership_column(conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(erp_fields)")}
         if "owner_customer_code" not in columns:
@@ -323,6 +376,12 @@ class RuleRepository:
         conn = sqlite3.connect(self.database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @staticmethod
+    def _normalize_customer_name(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = text.translate(str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]"}))
+        return re.sub(r"[\s()\[\]{}、,，.。\-_/]+", "", text)
 
     @staticmethod
     def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
