@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.env
 
 # Runtime-generated files; source samples and rules.db remain versioned.
 data/agentos.db-shm
