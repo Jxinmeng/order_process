@@ -300,7 +300,7 @@ class SourceTextReader:
     def _read_email_parts(self, source: Path) -> list[SourcePart]:
         message = BytesParser(policy=policy.default).parsebytes(source.read_bytes())
         body = [
-            f"发件人: {message.get('From', '')}", f"收件人: {message.get('To', '')}",
+            f"邮件头发件人: {message.get('From', '')}", f"邮件头收件人: {message.get('To', '')}",
             f"主题: {message.get('Subject', '')}", f"邮件时间: {message.get('Date', '')}",
         ]
         for part in message.walk():
