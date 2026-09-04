@@ -334,7 +334,6 @@ class StructuredOrderExtractor:
         self.repository = repository
         self.client = client
         self._cached_agent: Agent | None = None
-        self._cached_max_tokens: int = 0
         self.last_call_metrics: dict[str, Any] = {"called": False}
         self.order_batch_prompt_template = PromptLoader.load_order_batch_extraction_prompt()
 
@@ -392,17 +391,13 @@ class StructuredOrderExtractor:
         """统一通过 Agno Agent 调用 Qwen，并把网络错误转换为页面可见的业务错误。"""
         model = os.getenv("QWEN_MODEL", "qwen3.6")
         try:
-            max_tokens = int(os.getenv("QWEN_MAX_TOKENS", "8192"))
-        except ValueError as error:
-            raise RuntimeError("QWEN_MAX_TOKENS 必须是整数，例如 8192") from error
-        try:
             timeout_seconds = float(os.getenv("QWEN_TIMEOUT_SECONDS", "300"))
         except ValueError as error:
             raise RuntimeError("QWEN_TIMEOUT_SECONDS 必须是秒数，例如 120") from error
-        logger.info("Qwen 请求已发出：阶段=%s，模型=%s，输入字符数=%d，最大输出=%d，超时=%ds", stage, model, len(prompt), max_tokens, int(timeout_seconds))
+        logger.info("Qwen 请求已发出：阶段=%s，模型=%s，输入字符数=%d，超时=%ds", stage, model, len(prompt), int(timeout_seconds))
         import concurrent.futures
         try:
-            agent = self.client or self._get_or_create_agent(max_tokens)
+            agent = self.client or self._get_or_create_agent()
         except Exception as error:
             logger.exception("Qwen Agent 创建失败：阶段=%s，错误类型=%s", stage, type(error).__name__)
             raise RuntimeError(f"Qwen Agent 创建失败（{type(error).__name__}）：{error}") from error
@@ -448,12 +443,11 @@ class StructuredOrderExtractor:
         logger.info("Qwen 响应已收到：阶段=%s", stage)
         return content
 
-    def _get_or_create_agent(self, max_tokens: int) -> Agent:
-        if self._cached_agent is not None and self._cached_max_tokens == max_tokens:
+    def _get_or_create_agent(self) -> Agent:
+        if self._cached_agent is not None:
             return self._cached_agent
-        agent = self._agent(max_tokens)
+        agent = self._agent()
         self._cached_agent = agent
-        self._cached_max_tokens = max_tokens
         return agent
 
     def _fields(self) -> list[dict[str, str]]:
@@ -471,7 +465,7 @@ class StructuredOrderExtractor:
         }
 
     @staticmethod
-    def _agent(max_tokens: int) -> Agent:
+    def _agent() -> Agent:
         api_key = os.getenv("QWEN_API_KEY")
         if not api_key:
             raise RuntimeError("未配置 QWEN_API_KEY，无法执行结构化订单抽取")
@@ -486,7 +480,6 @@ class StructuredOrderExtractor:
             api_key=api_key,
             base_url=os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             timeout=timeout_seconds,
-            max_tokens=max_tokens,
             # Windows/Agno 默认读取系统代理；该代理会使百炼请求一直等不到响应。
             # 百炼直连已验证可达，因此此处明确不继承系统代理配置。
             http_client=httpx.Client(timeout=timeout_seconds, trust_env=False),

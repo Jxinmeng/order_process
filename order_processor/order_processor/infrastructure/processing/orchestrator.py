@@ -182,7 +182,7 @@ class LLMOrchestrator:
             if self._agno_agent.last_finish_reason == "length":
                 raise RuntimeError(
                     "模型输出超过长度上限，规则草稿在 JSON 完成前被截断。"
-                    "请将 DEEPSEEK_MAX_TOKENS 设置为至少 8192 后重试，或将规则表拆分上传"
+                    "请将规则表拆分后重试，或检查模型服务商的输出长度限制"
                 )
             return content
         raise RuntimeError("语义任务需要已配置的 DEEPSEEK_API_KEY 与 agno 依赖")

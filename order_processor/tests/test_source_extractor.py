@@ -1,10 +1,24 @@
 import json
+import os
 import unittest
+from unittest.mock import patch
 
+from order_processor.infrastructure.ingestion import source_extractor
 from order_processor.infrastructure.ingestion.source_extractor import StructuredOrderExtractor
 
 
 class SourceExtractorTests(unittest.TestCase):
+    def test_qwen_agent_does_not_set_a_client_output_token_limit(self):
+        with (
+            patch.dict(os.environ, {"QWEN_API_KEY": "test-key"}),
+            patch.object(source_extractor, "OpenAIChat") as model_class,
+            patch.object(source_extractor, "Agent"),
+            patch.object(source_extractor.httpx, "Client"),
+        ):
+            StructuredOrderExtractor._agent()
+
+        self.assertNotIn("max_tokens", model_class.call_args.kwargs)
+
     def test_only_declared_fields_are_passed_to_workflow(self):
         rows = StructuredOrderExtractor._validate(
             json.dumps({"orders": [{"客户代码": "C001", "型号": "A-1", "臆造字段": "不能进入规则引擎"}]}),

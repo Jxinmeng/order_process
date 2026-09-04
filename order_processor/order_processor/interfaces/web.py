@@ -30,6 +30,21 @@ from order_processor.shared.settings import load_project_env
 
 logger = logging.getLogger("uvicorn.error")
 
+RULE_PROCESS_MODE = "process"
+FULL_PROCESS_MODE = "full_process"
+PROCESSING_MODES = {RULE_PROCESS_MODE, FULL_PROCESS_MODE}
+
+
+def validate_upload_mode(mode: str, suffixes: list[str]) -> None:
+    """Validate the selected workflow without confusing raw and reviewed inputs."""
+    if mode not in {"mineru", "prepared_json", "extract", *PROCESSING_MODES}:
+        raise HTTPException(400, "不支持的处理模式")
+    prepared_suffixes = {".md", ".txt", ".docx", ".xlsx", ".json"}
+    if mode == "prepared_json" and any(suffix not in prepared_suffixes for suffix in suffixes):
+        raise HTTPException(400, "MD/Excel/Word → JSON 仅支持 .md、.txt、.docx、.xlsx 和 .json；PDF、图片和邮件请使用原始文件 → JSON")
+    if mode == RULE_PROCESS_MODE and any(suffix not in {".json", ".xlsx"} for suffix in suffixes):
+        raise HTTPException(400, "JSON → 执行规则仅支持已校对的 .json；原始 Excel 可直接执行")
+
 
 def register_web_ui(app: FastAPI, project_root: Path) -> None:
     input_dir, output_dir = project_root / "input", project_root / "output"
@@ -351,11 +366,11 @@ body{font:15px system-ui;max-width:1200px;margin:36px auto;padding:0 24px;color:
 :root{color-scheme:light;--navy:#172554;--blue:#2563eb;--blue-dark:#1d4ed8;--ink:#172033;--muted:#64748b;--line:#dbe4f0;--surface:#fff;--soft:#eff6ff}*{box-sizing:border-box}body{min-height:100vh;margin:0;padding:54px 24px;font:15px/1.55 system-ui,-apple-system,"Microsoft YaHei",sans-serif;color:var(--ink);background:radial-gradient(circle at 15% 5%,#dbeafe 0,transparent 28rem),linear-gradient(135deg,#f8fbff 0%,#f3f7fb 100%)}.shell{width:min(100%,820px);margin:auto}.eyebrow{margin:0 0 8px;color:var(--blue);font-size:13px;font-weight:750;letter-spacing:.1em}.hero{margin-bottom:28px}.hero h1{margin:0;color:var(--navy);font-size:clamp(30px,5vw,42px);letter-spacing:-.04em}.hero p{max-width:610px;margin:10px 0 0;color:var(--muted);font-size:16px}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 18px}.step{display:flex;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#ffffffb8;color:var(--muted)}.step b{display:grid;place-items:center;flex:0 0 auto;width:25px;height:25px;border-radius:50%;background:#dbeafe;color:var(--blue);font-size:13px}.step strong{color:#334155}.card{overflow:hidden;border:1px solid #d8e2ef;border-radius:18px;background:var(--surface);box-shadow:0 18px 46px #1e3a5f16}.card-header{padding:22px 26px 18px;border-bottom:1px solid #e8eef6}.card-header h2{margin:0;color:var(--navy);font-size:20px}.card-header p{margin:5px 0 0;color:var(--muted)}form{display:grid;gap:20px;padding:26px}label{display:grid;gap:7px;font-weight:700;color:#334155}input{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:var(--ink);font:inherit;transition:border-color .18s,box-shadow .18s}input:focus{outline:0;border-color:#60a5fa;box-shadow:0 0 0 4px #bfdbfe80}input[type=file]{padding:10px;background:#f8fafc;font-weight:400;cursor:pointer}input[type=file]::file-selector-button{margin-right:10px;padding:7px 10px;border:0;border-radius:6px;background:#e0edff;color:#1d4ed8;font:inherit;font-weight:650;cursor:pointer}.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.hint{color:var(--muted);font-size:13px;font-weight:400}.actions{display:flex;flex-wrap:wrap;gap:12px;padding-top:3px}button{min-height:43px;padding:10px 16px;border:1px solid transparent;border-radius:9px;background:var(--blue);color:#fff;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 4px 10px #2563eb38;transition:transform .16s,background .16s,box-shadow .16s}button:hover{background:var(--blue-dark);box-shadow:0 7px 15px #2563eb45;transform:translateY(-1px)}button:active{transform:translateY(0)}button.secondary{border-color:#cbd5e1;background:#fff;color:#334155;box-shadow:none}button.secondary:hover{background:#f8fafc;border-color:#94a3b8}.complete{margin-left:auto;background:#0f766e}.complete:hover{background:#0b5d57;box-shadow:0 7px 15px #0f766e40}#result{display:none;margin-top:18px;padding:15px 17px;border:1px solid #bfdbfe;border-radius:12px;background:var(--soft);color:#1e3a5f;white-space:pre-wrap}#result.show{display:block}#result.error{border-color:#fecaca;background:#fff1f2;color:#9f1239}#result a{color:#1d4ed8;font-weight:700}@media(max-width:700px){.steps{grid-template-columns:1fr}.complete{margin-left:0}}@media(max-width:600px){body{padding:32px 16px}.field-grid{grid-template-columns:1fr}.card-header,form{padding:20px}.actions button{width:100%}}
 </style></head><body><main class='shell'><header class='hero'><p class='eyebrow'>ORDER WORKFLOW</p><h1>订单处理器</h1><p>既可分步校对，也可从原始材料一键完成订单处理。</p></header><div class='steps'><div class='step'><b>1</b><span><strong>提取并校对</strong><br>原始材料转为 JSON</span></div><div class='step'><b>2</b><span><strong>执行订单规则</strong><br>校对后的 JSON 导出结果</span></div><div class='step'><b>✓</b><span><strong>完整订单处理</strong><br>原始材料直接导出 Excel</span></div></div><section class='card'><div class='card-header'><h2>上传订单材料</h2><p>一次可选择同一客户的一批文件。</p></div>
 <form id='form'><label>订单来源（可多选）<input name='files' type='file' multiple accept='.xlsx,.json,.eml,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.docx,.txt,.md' required><span class='hint'>PDF、图片和邮件会经 MinerU 解析；Word、Excel 本地读取后，材料将合并抽取。</span></label>
-<div class='field-grid'><label>提取批次名称<input name='batch_name' placeholder='例如 K-17-206'><span class='hint'>仅“提取并校对 JSON”需要填写；用于保存中间结果和 JSON。</span></label><label>规则处理输出文件名<input name='output_name' value='处理结果.xlsx'><span class='hint'>“执行订单规则”和“完整订单处理”使用，可保留默认名称。</span></label></div><div class='actions'><button name='mode' value='extract' type='submit'>提取并校对 JSON</button><button class='secondary' name='mode' value='process' type='submit'>JSON → 执行订单规则</button><button class='complete' name='mode' value='process' type='submit'>原始文件 → 完整订单处理</button></div></form></section>
+<div class='field-grid'><label>提取批次名称<input name='batch_name' placeholder='例如 K-17-206'><span class='hint'>仅“提取并校对 JSON”需要填写；用于保存中间结果和 JSON。</span></label><label>规则处理输出文件名<input name='output_name' value='处理结果.xlsx'><span class='hint'>“执行订单规则”和“完整订单处理”使用，可保留默认名称。</span></label></div><div class='actions'><button name='mode' value='extract' type='submit'>提取并校对 JSON</button><button class='secondary' name='mode' value='process' type='submit'>JSON → 执行订单规则</button><button class='complete' name='mode' value='full_process' type='submit'>原始文件 → 完整订单处理</button></div></form></section>
 <div id='result' role='status' aria-live='polite'>等待上传文件。</div></main><script>
 const form=document.querySelector('#form'), result=document.querySelector('#result');
 form.onsubmit=async e=>{e.preventDefault();const mode=e.submitter?.value||'process',fd=new FormData(form);fd.set('mode',mode);result.className='show';result.textContent=mode==='extract'?'正在提取订单字段，请稍候…':'正在执行订单规则，请稍候…';const r=await fetch('/ui/process',{method:'POST',body:fd});const d=await r.json();
-if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.detail||'未知错误');return}result.className='show';if(d.mode==='extract'){const mineru=d.mineru_download_url?`<br><a href="${d.mineru_download_url}">下载 MinerU 中间结果</a>`:'';result.innerHTML=`抽取完成：${d.file_count} 个文件，共 ${d.extracted_count} 行。<br><a href="${d.extraction_download_url}">下载并校对 JSON</a>${mineru}`;return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';const json=d.extraction_download_url?`<br><a href="${d.extraction_download_url}">下载抽取 JSON</a>`:'';result.innerHTML=`处理完成：${d.file_count} 个文件，共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>${json}`};
+if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.detail||'未知错误');return}result.className='show';if(d.mode==='extract'){const mineru=d.mineru_download_url?`<br><a href="${d.mineru_download_url}">下载 MinerU 中间结果</a>`:'';result.innerHTML=`抽取完成：${d.file_count} 个文件，共 ${d.extracted_count} 行。<br><a href="${d.extraction_download_url}">下载并校对 JSON</a>${mineru}`;return}const label=d.output_file_count>1?`下载拆分结果（${d.output_file_count} 个 Excel，ZIP）`:'下载处理结果';const json=d.extraction_download_url?`<br><a href="${d.extraction_download_url}">下载抽取 JSON</a>`:'';const mineru=d.mineru_download_url?`<br><a href="${d.mineru_download_url}">下载 MinerU 中间结果</a>`:'';result.innerHTML=`处理完成：${d.file_count} 个文件，共 ${d.total} 行，成功 ${d.success_count} 行。<br><a href="${d.download_url}">${label}</a>${json}${mineru}`};
 </script></body></html>"""
 
     @app.post("/ui/process", include_in_schema=False)
@@ -368,15 +383,9 @@ if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.
         suffixes = [Path(item.filename or "").suffix.lower() for item in files]
         if any(suffix not in allowed_suffixes for suffix in suffixes):
             raise HTTPException(400, "支持 .xlsx、.json、.eml、.pdf、图片（含 TIFF）、.docx、.txt 和 .md 文件")
-        if mode not in {"mineru", "prepared_json", "extract", "process"}:
-            raise HTTPException(400, "不支持的处理模式")
-        prepared_suffixes = {".md", ".txt", ".docx", ".xlsx", ".json"}
-        if mode == "prepared_json" and any(suffix not in prepared_suffixes for suffix in suffixes):
-            raise HTTPException(400, "MD/Excel/Word → JSON 仅支持 .md、.txt、.docx、.xlsx 和 .json；PDF、图片和邮件请使用原始文件 → JSON")
-        if mode == "process" and any(suffix not in {".json", ".xlsx"} for suffix in suffixes):
-            raise HTTPException(400, "JSON → 执行规则仅支持已校对的 .json；原始 Excel 可直接执行")
+        validate_upload_mode(mode, suffixes)
         requested_batch_name = batch_name.strip()
-        if mode == "process":
+        if mode in PROCESSING_MODES:
             safe_output = Path(output_name).name
             if Path(safe_output).suffix.lower() != ".xlsx":
                 safe_output += ".xlsx"
@@ -447,13 +456,13 @@ if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.
         try:
             # 同一次上传的全部材料合并后仅调用一次 Qwen；多张图片/多份附件
             # 因此可共同补足同一订单，而不是被错误地拆成独立订单。
-            batch_paths = [path for path in uploaded_paths if not (mode == "process" and path.suffix.lower() == ".xlsx")]
+            batch_paths = [path for path in uploaded_paths if not (mode in PROCESSING_MODES and path.suffix.lower() == ".xlsx")]
             if batch_paths:
                 logger.info("开始准备合并批次：%d 个文件", len(batch_paths))
                 ingestion = SourceIngestionService(
                     RuleRepository(project_root / "data" / "rules.db"), test_extraction_dir,
                 )
-                intermediate_path = test_mineru_dir / f"{safe_batch_name}.md" if mode == "extract" else None
+                intermediate_path = test_mineru_dir / f"{safe_batch_name}.md" if mode in {"extract", FULL_PROCESS_MODE} else None
                 if intermediate_path is not None and intermediate_path.exists():
                     raise HTTPException(409, f"MinerU 中间结果已存在：{intermediate_path.name}；请更换批次名称或先处理已有文件")
                 if mode in {"extract", "prepared_json"}:
@@ -462,7 +471,7 @@ if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.
                         raise HTTPException(409, f"JSON 输出已存在：{json_path.name}；请更换批次名称或先处理已有文件")
                 rows, extraction_json = ingestion.ingest_batch(
                     batch_paths, prepared=(mode == "prepared_json"),
-                    archive_stem=safe_batch_name if mode in {"extract", "prepared_json"} else None,
+                    archive_stem=safe_batch_name if mode in {"extract", "prepared_json", FULL_PROCESS_MODE} else None,
                     intermediate_markdown_path=intermediate_path,
                 )
                 logger.info("合并批次完成：抽取到 %d 条订单", len(rows))
@@ -477,7 +486,7 @@ if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.
                         raise HTTPException(500, f"订单处理失败：{result.get('failed_count', 0)} 行未成功")
                     saved_files.extend(Path(path) for path in result.get("output_files", []))
             for index, uploaded_path in enumerate(uploaded_paths, 1):
-                if mode != "process" or uploaded_path.suffix.lower() != ".xlsx":
+                if mode not in PROCESSING_MODES or uploaded_path.suffix.lower() != ".xlsx":
                     continue
                 target_path = output_path if len(uploaded_paths) == 1 else output_dir / f"{Path(safe_output).stem}_{index}_{uploaded_path.stem}.xlsx"
                 result = process_orders.execute(str(uploaded_path), str(target_path))
@@ -509,10 +518,16 @@ if(!r.ok){result.className='show error';result.textContent='处理失败：'+(d.
                 extraction_paths, test_extraction_dir, f"{safe_batch_name}_extractions.zip"
             )
             extraction_download_url = f"/ui/extractions/{extraction_download.name}"
+        mineru_download_url = None
+        if mode == FULL_PROCESS_MODE:
+            intermediate_download = test_mineru_dir / f"{safe_batch_name}.md"
+            if intermediate_download.is_file():
+                mineru_download_url = f"/ui/mineru-outputs/{intermediate_download.name}"
         return {
             "file_count": len(files), "total": total, "success_count": success_count,
             "output_file_count": len(saved_files),
             "extraction_download_url": extraction_download_url,
+            "mineru_download_url": mineru_download_url,
             "download_url": f"/ui/outputs/{download_name}",
         }
 
